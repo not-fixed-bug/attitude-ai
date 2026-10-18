@@ -1,0 +1,51 @@
+# File di configurazione Git per il progetto attitude-ai
+
+# Dipendenze Python
+venv/
+env/
+ENV/
+*.pyc
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Risultati del training
+models/
+logs/
+*.zip
+*.pkl
+
+# Grafici generati
+*.png
+*.jpg
+*.pdf
+
+# File di sistema
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb
+
+# Statistiche e dati sperimentali
+data/
+results/
+experiments/
+
+# TensorBoard
+events.out.tfevents.*
+
+# File temporanei
+*.log
+*.tmp
+*.bak
+
