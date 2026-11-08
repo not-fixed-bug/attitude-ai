@@ -19,6 +19,15 @@ import numpy as np
 from scipy.integrate import solve_ivp
 
 
+def canonicalize_observation(state):
+    """Seleziona lo stesso emisfero per i quaternioni equivalenti q e -q."""
+    obs = np.array(state, dtype=float, copy=True)
+    nonzero = np.flatnonzero(obs[:4])
+    if len(nonzero) and obs[nonzero[0]] < 0:
+        obs[:4] *= -1
+    return obs
+
+
 class SatelliteDynamics:
     """
     Classe per la simulazione della dinamica d'assetto di un microsatellite.
@@ -37,7 +46,7 @@ class SatelliteDynamics:
                            e ω è il vettore di velocità angolare [rad/s]
     """
 
-    def __init__(self, inertia_matrix=None, disturbances=None):
+    def __init__(self, inertia_matrix=None, disturbances=None, rng=None):
         """
         Inizializza la dinamica del satellite con una matrice di inerzia specificata.
 
@@ -71,6 +80,8 @@ class SatelliteDynamics:
         self.gravity_gradient = self.disturbances.get('gravity_gradient', False)
         self.solar_pressure = self.disturbances.get('solar_pressure', False)
         self.noise_std = self.disturbances.get('noise_std', 0.0)
+        self.rng = rng if rng is not None else np.random.default_rng()
+        self._step_noise = np.zeros(3)
         self.orbital_rate = self.disturbances.get('orbital_rate', 0.001)  # ~LEO 400km
 
         # Contatore temporale per disturbi dipendenti dal tempo
@@ -164,7 +175,11 @@ class SatelliteDynamics:
 
         if self.noise_std > 0.0:
             # Rumore bianco gaussiano (disturbi non modellati)
-            disturbance += np.random.normal(0.0, self.noise_std, size=3)
+            # Storico 2026-10-18:
+            # disturbance += np.random.normal(0.0, self.noise_std, size=3)
+            # Nella RHS il rumore dipendeva dalle chiamate adattive di RK45.
+            # Ora la coppia casuale resta costante per un passo di controllo.
+            disturbance += self._step_noise
 
         return disturbance
 
@@ -265,6 +280,10 @@ class SatelliteDynamics:
             - Il quaternione viene normalizzato dopo ogni step per mantenere ||q|| = 1
             - La normalizzazione è fondamentale per prevenire l'accumulo di errori numerici
         """
+        self._step_noise = (
+            self.rng.normal(0.0, self.noise_std, size=3)
+            if self.noise_std > 0.0 else np.zeros(3)
+        )
         # Integrazione numerica delle equazioni del moto dal tempo t=0 a t=dt
         sol = solve_ivp(
             fun=lambda t, y: self._dynamics(t, y, torques),
@@ -274,6 +293,8 @@ class SatelliteDynamics:
             vectorized=False
         )
 
+        if not sol.success or not np.all(np.isfinite(sol.y[:, -1])):
+            raise RuntimeError(f"Integrazione dinamica fallita: {sol.message}")
         # Estrazione dello stato finale dall'integratore
         self.state = sol.y[:, -1]
 
@@ -309,6 +330,7 @@ class SatelliteDynamics:
 
         # Reset del contatore temporale per i disturbi
         self.elapsed_time = 0.0
+        self._step_noise = np.zeros(3)
 
         return self.state.copy()
 
@@ -403,4 +425,3 @@ class SatelliteDynamics:
         yaw = np.arctan2(2 * (q0 * q3 + q1 * q2), 1 - 2 * (q2**2 + q3**2))
 
         return np.array([roll, pitch, yaw])
-

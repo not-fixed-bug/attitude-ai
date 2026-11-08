@@ -1,0 +1,11 @@
+N/C = non converge sotto 2 gradi per almeno gli ultimi 10 s.
+Success = anche ||omega|| < 0.01 rad/s negli ultimi 10 s.
+Energia = integrale ||tau applicata||^2 dt [N^2 m^2 s], non joule.
+Test                 Ctrl  T_set [s]  RMS [°]    SS err [°]  Energia      τ_max [Nm]  ω_max [r/s] Success 
+----------------------------------------------------------------------------------------------------------
+Test 1 (15°)         LQR   0.70       0.91       0.000       0.000515     0.0500      0.6843      True    
+Test 1 (15°)         PPO   2.00       1.41       0.608       0.000187     0.0500      0.4510      True    
+Test 2 (120°)        LQR   1.55       8.33       0.000       0.003766     0.0500      3.2728      True    
+Test 2 (120°)        PPO   3.70       10.61      0.608       0.002097     0.0500      2.5719      True    
+Test 3 (Robust.)     LQR   1.15       3.09       0.206       0.009517     0.0500      1.6454      False   
+Test 3 (Robust.)     PPO   3.00       4.08       0.698       0.004214     0.0500      1.1870      False   

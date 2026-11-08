@@ -17,17 +17,132 @@ Tesi Magistrale in Ingegneria Informatica
 import os
 import argparse
 import importlib.util
+import json
+from collections import defaultdict
 from datetime import datetime
 
-import numpy as np  # noqa: F401  (usato implicitamente da SB3/gymnasium)
+import numpy as np
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
-from stable_baselines3.common.callbacks import CheckpointCallback
+from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback
 from stable_baselines3.common.monitor import Monitor
-from satellite_env import SatelliteEnv
+from satellite_env import SatelliteEnv, PRECISION_REWARD_WEIGHT
+from experiment_history import save_experiment_manifest
 
 
-def make_env(domain_rand=False, sensor_noise=0.0, disturbances=False, obs_augmented=False):
+class ControlMetricsCallback(BaseCallback):
+    """Affianca alla reward le grandezze fisiche e il successo a fine episodio."""
+
+    def __init__(self):
+        super().__init__()
+        self.samples = defaultdict(list)
+
+    def _on_step(self):
+        for info, done in zip(self.locals["infos"], self.locals["dones"]):
+            for key in ("angle_error_deg", "omega_magnitude", "in_target", "reward_precision"):
+                self.samples[key].append(float(info[key]))
+            if done:
+                self.samples["episode_success"].append(float(info["success"]))
+        return True
+
+    def _on_rollout_end(self):
+        for key, values in self.samples.items():
+            self.logger.record(f"control/{key}", float(np.mean(values)))
+        self.samples.clear()
+
+
+class PhysicalValidationCallback(BaseCallback):
+    """Seleziona checkpoint su seed di validazione senza modificare VecNormalize."""
+
+    def __init__(self, output_dir, frequency, episodes, seed, dt, episode_seconds):
+        super().__init__()
+        self.output_dir = output_dir
+        self.frequency = frequency
+        self.episodes = episodes
+        self.seed = seed
+        self.dt = dt
+        self.episode_seconds = episode_seconds
+        self.best_score = None
+
+    @staticmethod
+    def selection_score(success_rate, tail_error, control_effort):
+        # Storico v1: si conservava solo il finale; nel pilota il checkpoint
+        # 100k puntava meglio di quello 301k, ma nessuno manteneva l'assetto.
+        # La reward di training non e' il criterio di selezione.
+        return (success_rate, -tail_error, -control_effort)
+
+    def _evaluate(self, phase):
+        from test_and_plot import compute_metrics, generate_initial_state, run_simulation
+
+        normalizer = self.model.get_vec_normalize_env()
+        if normalizer is None:
+            raise RuntimeError("La validazione richiede VecNormalize del training")
+        rows = []
+        for angle in (15.0, 120.0):
+            duration = max(self.episode_seconds, 80.0 if angle == 120.0 else 60.0)
+            for seed in range(self.seed, self.seed + self.episodes):
+                data = run_simulation(
+                    "PPO", generate_initial_state(angle, seed), total_time=duration,
+                    dt=self.dt, seed=seed, model=self.model, vec_normalize=normalizer
+                )
+                metrics = compute_metrics(data)
+                tail = data["time"] >= duration - 10.0
+                tail_angle = float(np.mean(data["angle_error"][tail]))
+                tail_omega = float(np.mean(np.linalg.norm(data["omega"][tail], axis=1)))
+                rows.append({
+                    "angle_deg": angle, "seed": seed, "duration_s": duration,
+                    "success": metrics["success"], "rms_error_deg": metrics["rms_error_deg"],
+                    "settling_time_s": (
+                        metrics["settling_time_s"] if metrics["settled"] else None
+                    ),
+                    "tail_angle_deg": tail_angle, "tail_omega_rad_s": tail_omega,
+                    "tail_normalized_error": tail_angle / 2.0 + tail_omega / 0.01,
+                    "control_effort": metrics["energy_consumption"],
+                })
+        success_rate = float(np.mean([row["success"] for row in rows]))
+        tail_error = float(np.mean([row["tail_normalized_error"] for row in rows]))
+        effort = float(np.mean([row["control_effort"] for row in rows]))
+        score = self.selection_score(success_rate, tail_error, effort)
+        improved = self.best_score is None or score > self.best_score
+        record = {
+            "timesteps": self.num_timesteps, "phase": phase, "dt": self.dt,
+            "success_rate": success_rate, "tail_normalized_error": tail_error,
+            "control_effort": effort, "selection_score": score, "new_best": improved,
+            "episodes": rows,
+        }
+        with open(os.path.join(self.output_dir, "validation_history.jsonl"), "a",
+                  encoding="utf-8") as handle:
+            handle.write(json.dumps(record, allow_nan=False) + "\n")
+        for key, value in (
+            ("success_rate", success_rate), ("tail_normalized_error", tail_error),
+            ("tail_angle_deg", float(np.mean([row["tail_angle_deg"] for row in rows]))),
+            ("tail_omega_rad_s", float(np.mean([row["tail_omega_rad_s"] for row in rows]))),
+        ):
+            self.logger.record(f"validation/{key}", value)
+        print(f"[VALIDAZIONE] step={self.num_timesteps} successo={success_rate:.1%} "
+              f"errore normalizzato={tail_error:.3f} nuovo_best={improved}")
+        if improved:
+            self.best_score = score
+            self.model.save(os.path.join(self.output_dir, "ppo_satellite_best"))
+            normalizer.save(os.path.join(self.output_dir, "best_vec_normalize.pkl"))
+            with open(os.path.join(self.output_dir, "best_validation.json"), "w",
+                      encoding="utf-8") as handle:
+                json.dump(record, handle, indent=2, allow_nan=False)
+
+    def _on_step(self):
+        if self.n_calls % self.frequency == 0:
+            self._evaluate("periodic")
+        return True
+
+    def _on_training_end(self):
+        # La valutazione nell'ultimo on_step precede l'aggiornamento PPO:
+        # valutare ancora qui include anche i pesi dopo l'ultimo update.
+        self._evaluate("final")
+        self.logger.dump(self.num_timesteps)
+
+
+def make_env(domain_rand=False, sensor_noise=0.0, disturbances=False, obs_augmented=False,
+             dt=0.1, episode_seconds=60.0):
     """
     Factory function per la creazione dell'ambiente satellitare.
 
@@ -36,6 +151,8 @@ def make_env(domain_rand=False, sensor_noise=0.0, disturbances=False, obs_augmen
         sensor_noise (float): Deviazione standard del rumore sui sensori
         disturbances (bool): Attiva i disturbi ambientali
         obs_augmented (bool): Attiva l'observation augmentation
+        dt (float): Periodo di controllo [s].
+        episode_seconds (float): Durata fisica di ogni episodio [s].
 
     Returns:
         callable: Funzione che istanzia un ambiente wrappato con Monitor
@@ -52,16 +169,33 @@ def make_env(domain_rand=False, sensor_noise=0.0, disturbances=False, obs_augmen
 
         env = SatelliteEnv(
             max_torque=0.05,
-            dt=0.1,
-            max_steps=600,
+            # Storico v1: dt=0.1, max_steps=600.
+            # Il pilota a 300k oscillava a ogni campione; variare dt deve
+            # mantenere la durata fisica dell'episodio, non i suoi 600 step.
+            dt=dt,
+            max_steps=episode_steps(dt, episode_seconds),
             domain_randomization=domain_rand,
             sensor_noise_std=sensor_noise,
             disturbances=dist_config,
             observation_augmented=obs_augmented
         )
-        env = Monitor(env)
+        env = Monitor(
+            env, info_keywords=("success", "angle_error_deg", "omega_magnitude")
+        )
         return env
     return _init
+
+
+def episode_steps(dt, episode_seconds):
+    """Evita arrotondamenti silenziosi della durata fisica richiesta."""
+    if not np.isfinite(dt) or dt <= 0:
+        raise ValueError("dt deve essere finito e positivo")
+    if not np.isfinite(episode_seconds) or episode_seconds < 10.0 + dt:
+        raise ValueError("episode-seconds deve consentire almeno 10 s di mantenimento")
+    steps = int(round(episode_seconds / dt))
+    if not np.isclose(steps * dt, episode_seconds, rtol=0, atol=1e-9):
+        raise ValueError("episode-seconds deve essere un multiplo di dt")
+    return steps
 
 
 def main():
@@ -82,21 +216,20 @@ def main():
     - CheckpointCallback: Salva il modello ogni 50.000 timesteps
     - TensorBoard: Logging in tempo reale di metriche di performance
 
-    Nota metodologica:
-    -----------------
-    L'addestramento di 1 milione di timesteps è scelto bilanciando:
-    - Convergenza della policy (richiede ~500k-800k steps per problemi simili)
-    - Tempo computazionale (circa 2-4 ore su CPU moderna)
-    - Prevenzione dell'overfitting sull'ambiente di training
-    
-    Reward shaping (versione 2.0):
-    ------------------------------
-    La funzione di reward è stata migliorata per incentivare tre obiettivi:
-    1. Riduzione dell'errore di assetto: reward positiva (1 - err_norm) * 10
-    2. Stabilizzazione (bassa velocità): reward positiva (1 - omega_norm) * 2
-    3. Efficienza energetica: penalità -0.005 * ||torques||^2
-    Questo porta a una reward densa e ben strutturata che accelera la convergenza
-    dell'agente verso la politica ottimale.
+    Revisione 2026-10-18:
+    --------------------
+    I run precedenti da 1M e 2M non stabilizzavano il satellite (RMS > 100
+    gradi). Il budget non garantisce convergenza: si parte con un pilota e
+    si valutano errore, velocita' e mantenimento oltre alla reward.
+    Reward corrente: -4*angle_error^2 -0.5*||omega||^2
+    -0.01*||torque/max_torque||^2 + 1 quando entro entrambe le soglie.
+    L'episodio dura episode-seconds anche se il bersaglio viene raggiunto.
+    Revisione v2: dt configurabile, validazione periodica indipendente
+    dalla reward e salvataggio della coppia modello/normalizzatore migliore.
+    Revisione v3: aggiunge 1 / (1 + (angle/deg2rad(2))^2 + (||omega||/0.01)^2).
+    Il best v2 arrestava il satellite ma a 2.072 gradi (0/5 successi).
+    L'efficacia della nuova reward deve essere valutata con un nuovo pilota.
+    La reward precedente resta commentata in SatelliteEnv.step.
     """
 
     # ===== PARSING DEGLI ARGOMENTI DA RIGA DI COMANDO =====
@@ -151,7 +284,39 @@ def main():
         default=False,
         help="Attiva l'observation augmentation (aggiunge errore angolare)"
     )
+    parser.add_argument("--seed", type=int, default=42, help="Seed del training")
+    parser.add_argument("--dt", type=float, default=0.1, help="Periodo di controllo [s]")
+    parser.add_argument("--episode-seconds", type=float, default=60.0,
+                        help="Durata fisica degli episodi [s]")
+    parser.add_argument("--eval-freq", type=int, default=100000,
+                        help="Valutazione fisica ogni N timestep (0 per disabilitare)")
+    parser.add_argument("--eval-episodes", type=int, default=3,
+                        help="Condizioni iniziali di validazione per ciascuno dei due scenari")
+    parser.add_argument("--eval-seed", type=int, default=2000,
+                        help="Seed di validazione, distinto dal test finale (1000)")
     args = parser.parse_args()
+    try:
+        max_steps = episode_steps(args.dt, args.episode_seconds)
+    except ValueError as exc:
+        parser.error(str(exc))
+    if args.timesteps <= 0 or args.checkpoint_freq <= 0:
+        parser.error("timesteps e checkpoint-freq devono essere positivi")
+    if not np.isfinite(args.sensor_noise) or args.sensor_noise < 0:
+        parser.error("sensor-noise deve essere finito e non negativo")
+    if not np.isfinite(args.learning_rate) or args.learning_rate <= 0:
+        parser.error("learning-rate deve essere finito e positivo")
+    if args.seed < 0:
+        parser.error("seed deve essere non negativo")
+    if args.eval_freq < 0 or args.eval_episodes <= 0 or args.eval_seed < 0:
+        parser.error("eval-freq ed eval-seed devono essere non negativi; eval-episodes positivo")
+    if args.obs_augmented and args.eval_freq:
+        parser.error("La validazione fisica e' 7D: usare --eval-freq 0 con --obs-augmented")
+    if args.eval_freq:
+        try:
+            episode_steps(args.dt, max(args.episode_seconds, 60.0))
+            episode_steps(args.dt, max(args.episode_seconds, 80.0))
+        except ValueError as exc:
+            parser.error(f"Durata di validazione non compatibile con dt: {exc}")
 
     print("="*70)
     print("TRAINING AGENTE PPO PER CONTROLLO D'ASSETTO SATELLITARE")
@@ -160,6 +325,9 @@ def main():
     print()
     print("Parametri da riga di comando:")
     print(f"  • Timesteps totali:        {args.timesteps:,}")
+    print(f"  • Passo controllo:         {args.dt} s")
+    print(f"  • Durata episodio:         {args.episode_seconds} s ({max_steps} step)")
+    print(f"  • Validazione fisica:      ogni {args.eval_freq} step (0 = OFF)")
     print(f"  • Frequenza checkpoint:    ogni {args.checkpoint_freq:,} steps")
     print(f"  • Learning rate:           {args.learning_rate:.0e}")
     print(f"  • Domain Randomization:    {'ON' if args.domain_rand else 'OFF'}")
@@ -178,11 +346,27 @@ def main():
     # Struttura risultante:
     #   models/run_20260821_153000/   <- checkpoint + modello finale + vecnormalize
     #   logs/run_20260821_153000/     <- log TensorBoard di questo specifico run
-    run_id = datetime.now().strftime("run_%Y%m%d_%H%M%S")
+    # Storico: timestamp al secondo poteva sovrascrivere due lanci ravvicinati.
+    # run_id = datetime.now().strftime("run_%Y%m%d_%H%M%S")
+    run_id = datetime.now().strftime("run_%Y%m%d_%H%M%S_%f")
     models_dir = os.path.join("models", run_id)
     logs_dir = os.path.join("logs", run_id)
-    os.makedirs(models_dir, exist_ok=True)
-    os.makedirs(logs_dir, exist_ok=True)
+    os.makedirs(models_dir, exist_ok=False)
+    os.makedirs(logs_dir, exist_ok=False)
+    save_experiment_manifest(models_dir, {
+        **vars(args), "max_steps": max_steps, "max_torque": 0.05,
+        "canonical_observations": True, "success_hold_s": 10.0,
+        "validation_angles_deg": [15.0, 120.0],
+        "best_selection": ["success_rate", "-tail_normalized_error", "-control_effort"],
+        # Il peso e le scale identificano l'esperimento: non attribuire alla
+        # v2 i risultati di questa reward e non confondere bonus con successo.
+        "precision_reward": {
+            "form": "weight / (1 + (angle_rad/angle_scale_rad)^2 + (omega/omega_scale_rad_s)^2)",
+            "weight": PRECISION_REWARD_WEIGHT,
+            "angle_scale_rad": float(np.deg2rad(2.0)),
+            "omega_scale_rad_s": 0.01,
+        },
+    })
 
     print(f"[INFO] Identificatore univoco del run: {run_id}")
     print(f"[INFO] Directory di output create:")
@@ -198,7 +382,9 @@ def main():
         domain_rand=args.domain_rand,
         sensor_noise=args.sensor_noise,
         disturbances=args.disturbances,
-        obs_augmented=args.obs_augmented
+        obs_augmented=args.obs_augmented,
+        dt=args.dt,
+        episode_seconds=args.episode_seconds
     )])
 
     # VecNormalize: Normalizzazione adattiva di osservazioni e reward
@@ -292,8 +478,11 @@ def main():
         policy="MlpPolicy",  # Policy basata su Multi-Layer Perceptron
         env=env,
         device="cpu",        # Per policy MLP, SB3 è generalmente più efficiente su CPU
+        seed=args.seed,
         **hyperparams
     )
+    model.control_dt = args.dt
+    model.canonical_observations = True
 
     print("[OK] Modello PPO inizializzato con successo")
     print()
@@ -338,17 +527,31 @@ def main():
     print("  - rollout/ep_len_mean: Lunghezza media degli episodi")
     print("  - train/learning_rate: Learning rate corrente")
     print("  - train/entropy_loss: Loss di entropia (exploration)")
-    print("  - train/policy_loss: Loss della policy")
+    print("  - train/policy_gradient_loss: Loss della policy")
     print("  - train/value_loss: Loss della value function")
+    print("  - control/angle_error_deg: Errore medio di assetto")
+    print("  - control/omega_magnitude: Velocita' angolare media [rad/s]")
+    print("  - control/in_target: Frazione di campioni entro entrambe le soglie")
+    print("  - control/episode_success: Successo negli ultimi 10 s dell'episodio")
+    print("  - control/reward_precision: Nuovo termine locale (non e' tasso di successo)")
+    print("  - validation/success_rate: Successo deterministico sui seed di validazione")
+    print("  - validation/tail_omega_rad_s: Velocita' negli ultimi 10 s")
+    print("  - validation/tail_angle_deg: Errore negli ultimi 10 s")
     print()
     print("-"*70)
     print()
 
     # Esecuzione del training
     # Il progresso viene visualizzato automaticamente grazie a verbose=1
+    callbacks = [checkpoint_callback, ControlMetricsCallback()]
+    if args.eval_freq:
+        callbacks.append(PhysicalValidationCallback(
+            models_dir, args.eval_freq, args.eval_episodes, args.eval_seed,
+            args.dt, args.episode_seconds
+        ))
     model.learn(
         total_timesteps=total_timesteps,
-        callback=checkpoint_callback,
+        callback=callbacks,
         progress_bar=enable_progress_bar  # Abilitata solo se dipendenze presenti
     )
 
@@ -367,6 +570,12 @@ def main():
     # (necessarie per utilizzare il modello in fase di test)
     vecnorm_path = os.path.join(models_dir, "vec_normalize.pkl")
     env.save(vecnorm_path)
+    with open(os.path.join(models_dir, "training_summary.json"), "w", encoding="utf-8") as handle:
+        json.dump({
+            "actual_timesteps": model.num_timesteps, "seed": args.seed,
+            "dt": args.dt, "episode_seconds": args.episode_seconds,
+            "simulated_seconds": model.num_timesteps * args.dt,
+        }, handle, indent=2)
     print(f"[OK] Statistiche di normalizzazione salvate in: {vecnorm_path}")
     print()
 
@@ -426,4 +635,3 @@ if __name__ == "__main__":
         - Per riprendere il training: modificare model.learn() per caricare un checkpoint esistente
     """
     main()
-

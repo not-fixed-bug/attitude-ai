@@ -1,0 +1,82 @@
+{
+  "revision": "2026-10-18-discrete-hold-v1",
+  "created_at_utc": "2026-10-18T14:48:42.844480+00:00",
+  "base_commit": "dd24ae2ec1fbd34b5fe016ff1db9276e01b78b96",
+  "python": "3.9.25",
+  "packages": {
+    "numpy": "2.0.2",
+    "scipy": "1.13.1",
+    "gymnasium": "1.1.1",
+    "stable-baselines3": "2.7.1",
+    "torch": "2.8.0"
+  },
+  "source_sha256": {
+    "experiment_history.py": "3e7173ed75afd5e4f8c436303165f87974d36da0ff0756980fdce30ee8245589",
+    "lqr_controller.py": "5a3942eeb031526bf3cc7d110500bc81ff9e679982b3d26a3b0a21959ca239cc",
+    "satellite_dynamics.py": "95110b4f003c507bc3521fe1f74e1d3606bc10a84da68aed0d9ccf38e6d7c07e",
+    "satellite_env.py": "eef6dc02e0cb330533d26d9057738b6e1de46dbc1ba50df273759d27066d2750",
+    "test_and_plot.py": "08a212916605495215def92c8ecdc0c3502736ddeaf4a2281099aee17badb688",
+    "test_control_regressions.py": "439014ddba231e25f5ceeecd726892155c15f6bd39cc3b9988506149fb988882",
+    "train.py": "9180cda3c3df1755c368ae8f5dd1698b051229f4a56a17d388f8189da45dac0c",
+    "requirements.txt": "3b084998f788db1285ee738cbc7b75806a8479a594ad7ed64a8acd9868ce3a47"
+  },
+  "configuration": {
+    "run": null,
+    "seed": 1000,
+    "episodes": 5,
+    "allow_legacy_model": false,
+    "model_path": "/home/gcontini/PycharmProjects/attitude-ai/models/run_20261018_164350_920143/ppo_satellite_final.zip",
+    "model_sha256": "abe50e645dbe402dcfe912cbee7fe14a2887722f99f79af3305807eb4518cc99",
+    "normalizer_sha256": "bb07fdd91a97a71bab1216f51af89318c6fb9b6e9fe5b9f487b48276287049c4",
+    "training_manifest": {
+      "revision": "2026-10-18-discrete-hold-v1",
+      "created_at_utc": "2026-10-18T14:43:50.940849+00:00",
+      "base_commit": "dd24ae2ec1fbd34b5fe016ff1db9276e01b78b96",
+      "python": "3.9.25",
+      "packages": {
+        "numpy": "2.0.2",
+        "scipy": "1.13.1",
+        "gymnasium": "1.1.1",
+        "stable-baselines3": "2.7.1",
+        "torch": "2.8.0"
+      },
+      "source_sha256": {
+        "experiment_history.py": "3e7173ed75afd5e4f8c436303165f87974d36da0ff0756980fdce30ee8245589",
+        "lqr_controller.py": "5a3942eeb031526bf3cc7d110500bc81ff9e679982b3d26a3b0a21959ca239cc",
+        "satellite_dynamics.py": "95110b4f003c507bc3521fe1f74e1d3606bc10a84da68aed0d9ccf38e6d7c07e",
+        "satellite_env.py": "eef6dc02e0cb330533d26d9057738b6e1de46dbc1ba50df273759d27066d2750",
+        "test_and_plot.py": "08a212916605495215def92c8ecdc0c3502736ddeaf4a2281099aee17badb688",
+        "test_control_regressions.py": "439014ddba231e25f5ceeecd726892155c15f6bd39cc3b9988506149fb988882",
+        "train.py": "9180cda3c3df1755c368ae8f5dd1698b051229f4a56a17d388f8189da45dac0c",
+        "requirements.txt": "3b084998f788db1285ee738cbc7b75806a8479a594ad7ed64a8acd9868ce3a47"
+      },
+      "configuration": {
+        "timesteps": 300000,
+        "checkpoint_freq": 50000,
+        "learning_rate": 0.0003,
+        "domain_rand": false,
+        "sensor_noise": 0.0,
+        "disturbances": false,
+        "obs_augmented": false,
+        "seed": 42,
+        "dt": 0.1,
+        "max_steps": 600,
+        "max_torque": 0.05,
+        "canonical_observations": true,
+        "success_hold_s": 10.0
+      }
+    },
+    "dt": 0.1,
+    "success_angle_deg": 2.0,
+    "success_omega_rad_s": 0.01,
+    "hold_time_s": 10.0,
+    "plots_seed": 1000,
+    "evaluation_seeds": [
+      1000,
+      1001,
+      1002,
+      1003,
+      1004
+    ]
+  }
+}

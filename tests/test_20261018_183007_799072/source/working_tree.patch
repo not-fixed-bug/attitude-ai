@@ -1,0 +1,1755 @@
+diff --git a/README.md b/README.md
+index 78389b8..a7505e8 100644
+--- a/README.md
++++ b/README.md
+@@ -5,6 +5,22 @@
+ Progetto di Tesi Magistrale in Ingegneria Informatica  
+ Confronto tra controllore classico (LQR) e agente Deep RL (PPO)
+ 
++> **Revisione sperimentale del 18 ottobre 2026:** usare la procedura corrente
++> in [RUNBOOK.md](RUNBOOK.md#procedura-corrente-revisione-2026-10-18).
++> LQR ora e' discreto; PPO apprende su episodi a orizzonte fisso con nuova
++> reward. Ogni run salva configurazione, seed e snapshot dei sorgenti.
++> I risultati precedenti restano conservati, ma i modelli storici richiedono
++> un consenso esplicito per essere valutati con la nuova baseline.
++> Le sezioni seguenti descrivono anche la versione originaria: per comandi,
++> metriche e limiti metodologici fa fede il RUNBOOK aggiornato.
++> **Secondo pilota (v2):** passo configurabile (`--dt 0.05`), episodi di
++> 60 s e selezione su validazione fisica separata dal test.
++> Usare i comandi v2 del RUNBOOK e `test_and_plot.py --model best`.
++> **Revisione corrente v3:** nuovo termine continuo di precisione locale,
++> motivato dal residuo di 2.072 gradi del best v2. Soglie, dt e criteri di
++> successo non cambiano. Usare ora la procedura v3 del RUNBOOK; i richiami
++> alle revisioni precedenti restano per lo storico.
++
+ ---
+ 
+ ## 📋 Descrizione del Progetto
+@@ -300,4 +316,3 @@ Anno Accademico 2025/2026
+ ---
+ 
+ **Per domande o problemi, consultare i commenti dettagliati nel codice sorgente.**
+-
+diff --git a/RUNBOOK.md b/RUNBOOK.md
+index 24b3642..ebe30de 100644
+--- a/RUNBOOK.md
++++ b/RUNBOOK.md
+@@ -4,7 +4,258 @@
+ 
+ **Progetto:** attitude-ai | Tesi Magistrale in Ingegneria Informatica  
+ **Scopo:** Confronto LQR vs PPO per il controllo d'assetto di un microsatellite  
+-**Ultimo aggiornamento:** Agosto 2026
++**Ultimo aggiornamento:** 18 ottobre 2026
++
++## Procedura corrente: revisione 2026-10-18
++
++### v3: precisione locale senza cambiare le soglie di successo
++
++Il run v2 `run_20261018_170417_025854` ha completato 600064 step a
++dt=0.05 s. Il best a 500k arresta il moto ma si ferma a circa 2.072 gradi,
++con zero successi su cinque condizioni nominali. Il finale e' a circa
++2.097 gradi. I due test delle 17:13 e 17:16 usano lo stesso best e gli
++stessi seed: non sono repliche indipendenti.
++
++L'ipotesi v3 e' che il segnale locale possa essere migliorato: la penalita'
++angolare v2 a 2.072 gradi e' solo circa -0.00523 per step. Questa osservazione
++non dimostra che la reward sia l'unica causa del bias.
++Si aggiunge esclusivamente il termine:
++
++```text
++precision_reward = 1 / (1 + (angle_rad / deg2rad(2))^2 + (||omega|| / 0.01)^2)
++```
++
++E' continuo, limitato fra 0 e 1, vale circa 0.482 al residuo v2 da fermo
++e 1 solo al bersaglio con velocita' nulla. Il termine di velocita' impedisce
++di ottenere il bonus pieno passando vicino al bersaglio mentre si oscilla.
++Restano invariati costo globale di assetto/velocita', costo delle azioni,
++bonus `in_target`, durata, reset, iperparametri e selezione fisica del best.
++Il premio totale al bersaglio da fermo passa da 1 a 2 per step; la reward
++complessiva conserva il vecchio salto del bonus `in_target`, mentre il
++nuovo termine locale non ha discontinuita' alla soglia.
++
++Il successo resta errore < 2 gradi E velocita' < 0.01 rad/s per gli ultimi
++10 s. Non si allarga la soglia per far passare il precedente modello.
++I commenti nel codice riportano risultati, formula sostituita e ragionamento.
++Manifest e snapshot identificano la revisione `2026-10-18-local-precision-v3`
++e registrano peso e scale del nuovo termine.
++
++Eseguire un nuovo training da zero, allo stesso budget e con gli stessi
++seed della v2, per confrontare la nuova reward:
++
++```bash
++cd /home/gcontini/PycharmProjects/attitude-ai
++source venv/bin/activate
++
++python train.py --timesteps 600000 --dt 0.05 --episode-seconds 60 \
++  --checkpoint-freq 100000 --eval-freq 100000 --eval-episodes 3 \
++  --eval-seed 2000 --seed 42
++
++python test_and_plot.py --model best --episodes 5 --seed 1000
++```
++
++In TensorBoard `control/reward_precision` mostra il nuovo contributo, non
++un successo. La decisione continua a basarsi su `validation/success_rate`,
++errore e velocita' finali e test separato. Primo criterio operativo:
++almeno 4 successi nominali su 5, senza oscillazione persistente. Non c'e'
++garanzia che la v3 raggiunga questo obiettivo con 600k step.
++I seed 1000-1004 sono gia' stati usati per lo sviluppo: per una conferma
++finale da tesi usare in seguito condizioni/seed nuovi e piu' training
++indipendenti, non soltanto quelli ripetutamente esaminati durante il tuning.
++
++### Storico v2: pilota con campionamento a 0.05 s e selezione fisica del modello
++
++Il pilota `run_20261018_164350_920143` (301056 step, dt=0.1 s) ha
++mostrato oscillazioni persistenti: coppie X/Y circa +/-0.05 N m che
++invertono segno ogni campione, velocita' residua circa 0.355 rad/s e
++errore nominale circa 2.52 gradi, con zero successi su cinque seed.
++Il checkpoint 100k aveva meno errore del finale, senza pero' mantenimento.
++Una prova diagnostica della stessa policy a dt=0.05 s elimina
++l'oscillazione, ma lascia un bias di circa 2.23 gradi: non e' ancora successo.
++
++La v2 rende il passo configurabile e lo propaga da `manifest.json`
++a tutti gli scenari, alla baseline LQR, ai tempi di guasto e alle metriche.
++Non cambiano reward e iperparametri PPO: e' un nuovo esperimento sul
++campionamento, non una correzione gia' dimostrata del bias di puntamento.
++Gamma, GAE e rollout restano per-step: cambiando dt cambia anche la loro
++durata fisica, quindi questo pilota non isola tutti gli effetti del training.
++
++Eseguire questi comandi, non il pilota v1 riportato nello storico:
++
++```bash
++cd /home/gcontini/PycharmProjects/attitude-ai
++source venv/bin/activate
++
++python train.py --timesteps 600000 --dt 0.05 --episode-seconds 60 \
++  --checkpoint-freq 100000 --eval-freq 100000 --eval-episodes 3 \
++  --eval-seed 2000 --seed 42
++
++python test_and_plot.py --model best --episodes 5 --seed 1000
++```
++
++Sono 1200 step per episodio e circa 30000 secondi simulati complessivi,
++lo stesso tempo fisico di 300k step a 0.1 s; il numero di transizioni raddoppia.
++Il modello riparte da zero. PPO puo' completare il rollout oltre il budget
++richiesto: leggere `training_summary.json` per conteggio e tempo effettivi.
++Non e' stato avviato automaticamente alcun training lungo.
++
++La validazione ogni 100k step usa tre seed separati (2000-2002) a 15 e
++120 gradi, senza rumore o guasti, per 60 e 80 s rispettivamente. E' eseguita
++anche al termine, dopo l'ultimo aggiornamento PPO. Non aggiorna le statistiche
++del normalizzatore di training. Il test finale usa altri seed (1000-1004),
++non quelli usati per selezionare il modello.
++
++La selezione e' lessicografica: prima tasso di successo negli ultimi 10 s,
++poi minore errore fisico normalizzato medio nella stessa finestra
++`angle_deg / 2 + ||omega|| / 0.01`, infine minore integrale della coppia
++applicata al quadrato. Un modello chiamato `best` puo' comunque avere
++zero successi: significa solo migliore tra quelli valutati.
++
++Nuovi file nella cartella del training:
++
++| File | Contenuto |
++|---|---|
++| `ppo_satellite_best.zip` | Policy migliore sui seed di validazione |
++| `best_vec_normalize.pkl` | Normalizzatore dello stesso istante della policy best |
++| `best_validation.json` | Step selezionato, score e metriche per episodio |
++| `validation_history.jsonl` | Storico di tutte le valutazioni, inclusa quella finale |
++
++`--model best` carica esclusivamente questa coppia; nessun fallback silenzioso.
++`--model final` (default, per compatibilita' CLI) carica invece la coppia finale.
++Per confrontarle, dopo il test best eseguire:
++
++```bash
++python test_and_plot.py --model final --episodes 5 --seed 1000
++```
++
++In TensorBoard leggere `validation/success_rate`, `validation/tail_angle_deg`
++e `validation/tail_omega_rad_s`. Il successo resta errore < 2 gradi e
++velocita' < 0.01 rad/s per gli ultimi 10 s. Come criterio preliminare
++del pilota, richiedere almeno 4 successi nominali su 5 nel test separato;
++non basta che la reward migliori o che il modello sia chiamato best.
++`--eval-freq 0` disattiva la validazione e non produce un modello best;
++e' obbligatorio per il training 10D `--obs-augmented`, non supportato qui.
++
++Le revisioni precedenti richiedono `--allow-legacy-model` esplicito.
++Gli output v1 restano conservati e non vanno mescolati statisticamente
++con i nuovi. Manifest e snapshot identificano la revisione v2.
++
++### Storico v1: discreto e mantenimento (precedente al secondo pilota)
++
++La campagna storica `test_20261018_131553` / `test_20261018_161240` ha
++mostrato RMS PPO di circa 101-105 gradi, senza stabilizzazione, e residuo
++LQR nominale di 2.644 gradi. I risultati sono conservati, non sostituiti.
++Non dimostrano superiorita' del PPO ne' robustezza ai guasti.
++
++La nuova revisione usa LQR discreto con ZOH a 0.1 s, quaternioni con segno
++coerente, reward quadratica anche sulla velocita', episodi a orizzonte fisso,
++generatori casuali locali e rumore di coppia mantenuto costante nello step.
++Il successo richiede errore < 2 gradi e velocita' < 0.01 rad/s negli ultimi
++10 s. Il settling time riguarda la sola soglia angolare, mantenuta per
++almeno gli ultimi 10 s: `N/C` significa non convergenza, non fine simulazione.
++
++### Comandi in ordine
++
++```bash
++cd /home/gcontini/PycharmProjects/attitude-ai
++source venv/bin/activate
++
++# Pilota: nessuna garanzia di convergenza a questo budget.
++python train.py --timesteps 300000 --checkpoint-freq 50000 --seed 42
++python test_and_plot.py --episodes 5 --seed 1000
++```
++
++In un secondo terminale, con lo stesso ambiente attivo:
++
++```bash
++tensorboard --logdir=logs
++```
++
++Osservare `control/angle_error_deg`, `control/omega_magnitude`,
++`control/in_target` e `control/episode_success` oltre a `rollout/ep_rew_mean`.
++Lunghezza episodio ora fissa: non deve scendere quando il controllo migliora.
++Se non emerge stabilizzazione, diagnosticare prima di aumentare i timestep.
++
++Solo dopo un pilota soddisfacente:
++
++```bash
++python train.py --timesteps 1000000 --checkpoint-freq 100000 --seed 42
++python test_and_plot.py --episodes 20 --seed 1000
++
++python train.py --timesteps 2000000 --checkpoint-freq 100000 --seed 42 \
++  --domain-rand --sensor-noise 0.005
++python test_and_plot.py --episodes 20 --seed 1000
++```
++
++Ogni training parte da zero; non e' una ripresa del precedente. I timestep
++effettivi possono essere arrotondati da PPO al rollout successivo e sono
++registrati in `training_summary.json`. Ripetere le due configurazioni con
++altri seed di training (ad esempio 43-46) per stimare la variabilita' fra
++policy; piu' episodi dello stesso modello non sostituiscono training indipendenti.
++
++Per selezionare un training specifico senza modificare `latest_run.txt`:
++
++```bash
++python test_and_plot.py --run models/run_DATA_ORA_MICROSECONDI \
++  --episodes 20 --seed 1000
++```
++
++Non usare `--obs-augmented` con questa campagna: il modello 10D viene rifiutato
++esplicitamente. I modelli precedenti alla revisione sono rifiutati per default;
++per sola analisi esplorativa:
++
++```bash
++python test_and_plot.py --run models/run_20261018_151238 \
++  --allow-legacy-model --episodes 5 --seed 1000
++```
++
++Questo NON riproduce la vecchia baseline: LQR e metriche sono aggiornati.
++Non mescolare risultati di revisioni diverse nella stessa media.
++I guasti sono applicati solo in valutazione: si misura robustezza a guasti
++non visti, non adattamento online o apprendimento esplicito dei guasti.
++
++### Output e storico riproducibile
++
++Ogni nuovo run ha timestamp con microsecondi e una cartella distinta.
++`manifest.json` registra revisione, parametri, seed, versioni delle librerie,
++commit di partenza e hash SHA-256 dei sorgenti; `source/` contiene una copia
++esatta dei moduli Python, delle dipendenze dichiarate e il diff rispetto a HEAD.
++Non vengono creati commit automaticamente.
++
++I test registrano anche percorso/hash del modello e normalizzatore e il
++manifest del training. Nessun fallback se manca `vec_normalize.pkl`.
++
++| Output in `tests/test_.../` | Significato |
++|---|---|
++| `metriche_comparative.csv` / `.txt` | Metriche delle traiettorie illustrate, seed esplicito |
++| `robustezza_sweep.csv` | Dati numerici dei due sweep illustrativi, singolo seed |
++| `episodi.csv` | Metriche di ogni replica e seed, nei tre scenari |
++| `statistiche.csv` | Media, deviazione standard campionaria, numero valori validi/totali |
++| `*_seed*.npz` | Serie temporali complete delle repliche |
++| `manifest.json`, `source/` | Identita' del modello, configurazione e sorgenti |
++
++Le serie `.npz` contengono N+1 stati/tempi, incluso l'istante finale,
++e N coppie applicate nei rispettivi intervalli ZOH.
++
++`success` medio in `statistiche.csv` e' il tasso di successo, da 0 a 1.
++La media del settling time esclude i fallimenti: leggere sempre
++`n_valid/n_total` insieme al tasso di successo. Con una sola replica la
++deviazione standard e' `N/A`. Gli sweep restano illustrativi, non bande
++statistiche multi-seed. La metrica storicamente chiamata "Energia" e'
++l'integrale della coppia applicata al quadrato, in N^2 m^2 s, non joule.
++Il rumore sensori e' una deviazione standard additiva sulle componenti
++quaternioniche e sulle velocita' in rad/s: non una percentuale fisica uniforme.
++
++Regressioni locali senza installare nuovi strumenti:
++
++```bash
++python -m unittest test_control_regressions -v
++```
++
++## Archivio operativo precedente (agosto 2026)
++
++Il resto del documento e' conservato per lo storico. In caso di differenze,
++valgono procedura, metriche e avvertenze della revisione qui sopra.
+ 
+ ---
+ 
+@@ -300,4 +551,3 @@ rm -rf tests/
+ # Elimina solo i log
+ rm -rf logs/
+ ```
+-
+diff --git a/lqr_controller.py b/lqr_controller.py
+index ac0903f..8e185f5 100644
+--- a/lqr_controller.py
++++ b/lqr_controller.py
+@@ -14,7 +14,9 @@ Tesi Magistrale in Ingegneria Informatica
+ """
+ 
+ import numpy as np
+-from scipy.linalg import solve_continuous_are
++from scipy.linalg import solve_discrete_are
++from scipy.signal import cont2discrete
++from satellite_dynamics import canonicalize_observation
+ 
+ 
+ class LQRController:
+@@ -68,9 +70,15 @@ class LQRController:
+         R (np.ndarray): Matrice di peso per i controlli (3x3)
+         K (np.ndarray): Matrice di guadagno ottimale LQR (3x6)
+         max_torque (float): Saturazione delle coppie di controllo [N·m]
++        dt (float): Periodo di campionamento [s].
++
++    Dal 2026-10-18 il progetto usa la versione discreta:
++    J = sum_k (x_k.T Q x_k + u_k.T R u_k),
++    x_{k+1} = A_d x_k + B_d u_k, con discretizzazione ZOH.
++    Le equazioni continue sopra sono conservate come riferimento teorico.
+     """
+ 
+-    def __init__(self, inertia_matrix=None, Q=None, R=None, max_torque=0.05):
++    def __init__(self, inertia_matrix=None, Q=None, R=None, max_torque=0.05, dt=0.1):
+         """
+         Inizializza il controllore LQR e calcola la matrice di guadagno ottimale.
+ 
+@@ -103,6 +111,9 @@ class LQRController:
+ 
+         # Limite di saturazione degli attuatori
+         self.max_torque = max_torque
++        if not np.isfinite(dt) or dt <= 0:
++            raise ValueError("dt deve essere finito e positivo")
++        self.dt = dt
+ 
+         # ===== CONFIGURAZIONE DELLE MATRICI DI PESO =====
+ 
+@@ -125,12 +136,20 @@ class LQRController:
+         # Costruzione delle matrici A e B del sistema linearizzato
+         A, B = self._get_linearized_system()
+ 
+-        # Risoluzione dell'equazione algebrica di Riccati continua (CARE)
+-        # A^T P + P A - P B R^(-1) B^T P + Q = 0
+-        P = solve_continuous_are(A, B, self.Q, self.R)
+-
+-        # Calcolo della matrice di guadagno ottimale: K = R^(-1) B^T P
+-        self.K = np.linalg.inv(self.R) @ B.T @ P
++        # Risoluzione dell'equazione algebrica di Riccati discreta (DARE).
++        # Storico 2026-10-18: RMS nominale 3.17 gradi, residuo 2.644 gradi
++        # e coppie continuamente saturate nei test storici.
++        # P = solve_continuous_are(A, B, self.Q, self.R)
++        # self.K = np.linalg.inv(self.R) @ B.T @ P
++        # Il progetto continuo ignorava il mantenimento ZOH per dt=0.1 s.
++        self.A_d, self.B_d, _, _, _ = cont2discrete(
++            (A, B, np.eye(6), np.zeros((6, 3))), dt, method="zoh"
++        )
++        P = solve_discrete_are(self.A_d, self.B_d, self.Q, self.R)
++        self.K = np.linalg.solve(
++            self.R + self.B_d.T @ P @ self.B_d,
++            self.B_d.T @ P @ self.A_d
++        )
+ 
+     def _get_linearized_system(self):
+         """
+@@ -218,7 +237,11 @@ class LQRController:
+         # dove θ è l'angolo di rotazione e n̂ è l'asse di rotazione unitario
+         #
+         # Invertendo: θ * n̂ ≈ 2 * [q1, q2, q3] (valido per piccoli angoli)
+-        euler_angles = 2.0 * quaternion[1:]  # Approssimazione: θ ≈ 2 * q_vector
++        # Storico 2026-10-18:
++        # euler_angles = 2.0 * quaternion[1:]
++        # q e -q sono lo stesso assetto: non devono invertire il comando.
++        quaternion = canonicalize_observation(state)[:4]
++        euler_angles = 2.0 * quaternion[1:]
+ 
+         # ===== COSTRUZIONE DEL VETTORE DI ERRORE =====
+         # Il vettore di stato per l'LQR è: x = [θx, θy, θz, ωx, ωy, ωz]
+@@ -282,4 +305,3 @@ class LQRController:
+         control[fault_axis] *= (1.0 - fault_severity)
+ 
+         return control
+-
+diff --git a/satellite_dynamics.py b/satellite_dynamics.py
+index d707bfa..12dfa6d 100644
+--- a/satellite_dynamics.py
++++ b/satellite_dynamics.py
+@@ -19,6 +19,15 @@ import numpy as np
+ from scipy.integrate import solve_ivp
+ 
+ 
++def canonicalize_observation(state):
++    """Seleziona lo stesso emisfero per i quaternioni equivalenti q e -q."""
++    obs = np.array(state, dtype=float, copy=True)
++    nonzero = np.flatnonzero(obs[:4])
++    if len(nonzero) and obs[nonzero[0]] < 0:
++        obs[:4] *= -1
++    return obs
++
++
+ class SatelliteDynamics:
+     """
+     Classe per la simulazione della dinamica d'assetto di un microsatellite.
+@@ -37,7 +46,7 @@ class SatelliteDynamics:
+                            e ω è il vettore di velocità angolare [rad/s]
+     """
+ 
+-    def __init__(self, inertia_matrix=None, disturbances=None):
++    def __init__(self, inertia_matrix=None, disturbances=None, rng=None):
+         """
+         Inizializza la dinamica del satellite con una matrice di inerzia specificata.
+ 
+@@ -71,6 +80,8 @@ class SatelliteDynamics:
+         self.gravity_gradient = self.disturbances.get('gravity_gradient', False)
+         self.solar_pressure = self.disturbances.get('solar_pressure', False)
+         self.noise_std = self.disturbances.get('noise_std', 0.0)
++        self.rng = rng if rng is not None else np.random.default_rng()
++        self._step_noise = np.zeros(3)
+         self.orbital_rate = self.disturbances.get('orbital_rate', 0.001)  # ~LEO 400km
+ 
+         # Contatore temporale per disturbi dipendenti dal tempo
+@@ -164,7 +175,11 @@ class SatelliteDynamics:
+ 
+         if self.noise_std > 0.0:
+             # Rumore bianco gaussiano (disturbi non modellati)
+-            disturbance += np.random.normal(0.0, self.noise_std, size=3)
++            # Storico 2026-10-18:
++            # disturbance += np.random.normal(0.0, self.noise_std, size=3)
++            # Nella RHS il rumore dipendeva dalle chiamate adattive di RK45.
++            # Ora la coppia casuale resta costante per un passo di controllo.
++            disturbance += self._step_noise
+ 
+         return disturbance
+ 
+@@ -265,6 +280,10 @@ class SatelliteDynamics:
+             - Il quaternione viene normalizzato dopo ogni step per mantenere ||q|| = 1
+             - La normalizzazione è fondamentale per prevenire l'accumulo di errori numerici
+         """
++        self._step_noise = (
++            self.rng.normal(0.0, self.noise_std, size=3)
++            if self.noise_std > 0.0 else np.zeros(3)
++        )
+         # Integrazione numerica delle equazioni del moto dal tempo t=0 a t=dt
+         sol = solve_ivp(
+             fun=lambda t, y: self._dynamics(t, y, torques),
+@@ -274,6 +293,8 @@ class SatelliteDynamics:
+             vectorized=False
+         )
+ 
++        if not sol.success or not np.all(np.isfinite(sol.y[:, -1])):
++            raise RuntimeError(f"Integrazione dinamica fallita: {sol.message}")
+         # Estrazione dello stato finale dall'integratore
+         self.state = sol.y[:, -1]
+ 
+@@ -309,6 +330,7 @@ class SatelliteDynamics:
+ 
+         # Reset del contatore temporale per i disturbi
+         self.elapsed_time = 0.0
++        self._step_noise = np.zeros(3)
+ 
+         return self.state.copy()
+ 
+@@ -403,4 +425,3 @@ class SatelliteDynamics:
+         yaw = np.arctan2(2 * (q0 * q3 + q1 * q2), 1 - 2 * (q2**2 + q3**2))
+ 
+         return np.array([roll, pitch, yaw])
+-
+diff --git a/satellite_env.py b/satellite_env.py
+index 3c3e3c1..5354417 100644
+--- a/satellite_env.py
++++ b/satellite_env.py
+@@ -22,7 +22,13 @@ Tesi Magistrale in Ingegneria Informatica
+ import numpy as np
+ import gymnasium as gym
+ from gymnasium import spaces
+-from satellite_dynamics import SatelliteDynamics
++from satellite_dynamics import SatelliteDynamics, canonicalize_observation
++
++
++# v3: termine limitato a 1, per rafforzare la precisione locale senza
++# sostituire i costi globali. E' un'ipotesi da confrontare con v2, non un
++# peso ottimizzato: il best v2 si fermava a 2.072 gradi con omega quasi zero.
++PRECISION_REWARD_WEIGHT = 1.0
+ 
+ 
+ class SatelliteEnv(gym.Env):
+@@ -67,12 +73,20 @@ class SatelliteEnv(gym.Env):
+                                                 Se None, usa distribuzione uniforme completa.
+         """
+         super(SatelliteEnv, self).__init__()
++        if not np.isfinite(dt) or dt <= 0 or max_steps <= 0:
++            raise ValueError("dt e max_steps devono essere positivi")
++        if not np.isfinite(max_torque) or max_torque <= 0:
++            raise ValueError("max_torque deve essere finito e positivo")
++        if not np.isfinite(sensor_noise_std) or sensor_noise_std < 0:
++            raise ValueError("sensor_noise_std deve essere finito e non negativo")
+ 
+         # Parametri di configurazione
+         self.max_torque = max_torque
+         self.dt = dt
+         self.max_steps = max_steps
+         self.current_step = 0
++        self.target_hold_steps = 0
++        self.required_hold_steps = int(np.ceil(10.0 / dt)) + 1
+         self.target_quaternion = np.array([1.0, 0.0, 0.0, 0.0])
+ 
+         # Domain Randomization
+@@ -99,18 +113,25 @@ class SatelliteEnv(gym.Env):
+         )
+ 
+         # ===== DEFINIZIONE DEGLI SPAZI =====
++        # Storico 2026-10-18: omega era limitata a [-10, 10] nel Box,
++        # ma non nella dinamica (i run storici superano 200 rad/s).
++        # Non si taglia lo stato fisico: si dichiara lo spazio effettivo.
+         if self.observation_augmented:
+             # 7 (stato) + 3 (errore angolare vettoriale) = 10 dimensioni
+             self.observation_space = spaces.Box(
+-                low=np.array([-1.0, -1.0, -1.0, -1.0, -10.0, -10.0, -10.0, -1.0, -1.0, -1.0]),
+-                high=np.array([1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 1.0, 1.0, 1.0]),
++                low=np.array([-1.0, -1.0, -1.0, -1.0, -np.inf, -np.inf, -np.inf,
++                              -1.0, -1.0, -1.0], dtype=np.float32),
++                high=np.array([1.0, 1.0, 1.0, 1.0, np.inf, np.inf, np.inf,
++                               1.0, 1.0, 1.0], dtype=np.float32),
+                 dtype=np.float32
+             )
+         else:
+             # 7 dimensioni (modalità standard)
+             self.observation_space = spaces.Box(
+-                low=np.array([-1.0, -1.0, -1.0, -1.0, -10.0, -10.0, -10.0]),
+-                high=np.array([1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0]),
++                low=np.array([-1.0, -1.0, -1.0, -1.0, -np.inf, -np.inf, -np.inf],
++                             dtype=np.float32),
++                high=np.array([1.0, 1.0, 1.0, 1.0, np.inf, np.inf, np.inf],
++                              dtype=np.float32),
+                 dtype=np.float32
+             )
+ 
+@@ -136,16 +157,20 @@ class SatelliteEnv(gym.Env):
+ 
+         # Aggiunta del rumore sui sensori
+         if self.sensor_noise_std > 0.0:
+-            noise = np.random.normal(0.0, self.sensor_noise_std, size=obs.shape)
++            # Storico 2026-10-18: il generatore globale accoppiava gli ambienti.
++            # noise = np.random.normal(0.0, self.sensor_noise_std, size=obs.shape)
++            noise = self.np_random.normal(0.0, self.sensor_noise_std, size=obs.shape)
+             obs += noise
+             # Ri-normalizzazione del quaternione dopo il rumore
+             q_norm = np.linalg.norm(obs[:4])
+             if q_norm > 1e-10:
+                 obs[:4] /= q_norm
+ 
+-        # Observation augmentation: aggiunta dell'errore angolare esplicito
++        obs = canonicalize_observation(obs)
++        # Observation augmentation: usa la stessa misura, anche se rumorosa.
+         if self.observation_augmented:
+-            q_error = self.dynamics.quaternion_error(state[:4], self.target_quaternion)
++            # Prima state[:4] esponeva lo stato vero anche con rumore sensori.
++            q_error = self.dynamics.quaternion_error(obs[:4], self.target_quaternion)
+             # Parte vettoriale del quaternione di errore (proporzionale all'errore angolare)
+             angle_error_vec = q_error[1:]  # [e1, e2, e3]
+             obs = np.concatenate([obs, angle_error_vec])
+@@ -159,35 +184,41 @@ class SatelliteEnv(gym.Env):
+         Se domain_randomization è attivo, varia la matrice di inerzia.
+         Se initial_angle_max è specificato, limita l'angolo iniziale (curriculum learning).
+         """
+-        if seed is not None:
+-            np.random.seed(seed)
++        # Storico 2026-10-18:
++        # if seed is not None:
++        #     np.random.seed(seed)
++        # Seed locale Gymnasium: ambienti distinti non si influenzano.
++        super().reset(seed=seed)
+ 
+         self.current_step = 0
++        self.target_hold_steps = 0
+ 
+         # === DOMAIN RANDOMIZATION ===
+         if self.domain_randomization:
+             # Perturbazione uniforme della matrice di inerzia nominale
+-            noise = 1.0 + np.random.uniform(
++            noise = 1.0 + self.np_random.uniform(
+                 -self.inertia_noise_pct, self.inertia_noise_pct, size=3
+             )
+             randomized_inertia = np.diag(np.diag(self.nominal_inertia) * noise)
+             self.dynamics = SatelliteDynamics(
+                 inertia_matrix=randomized_inertia,
+-                disturbances=self.disturbances
++                disturbances=self.disturbances,
++                rng=self.np_random
+             )
++        self.dynamics.rng = self.np_random
+ 
+         # === GENERAZIONE CONDIZIONE INIZIALE ===
+         if self.initial_angle_max is not None:
+             # Curriculum Learning: angolo iniziale limitato
+-            angle = np.random.uniform(0, self.initial_angle_max)
+-            axis = np.random.randn(3)
++            angle = self.np_random.uniform(0, self.initial_angle_max)
++            axis = self.np_random.normal(size=3)
+             axis /= np.linalg.norm(axis)
+             q0 = np.cos(angle / 2.0)
+             qv = np.sin(angle / 2.0) * axis
+             random_quaternion = np.array([q0, qv[0], qv[1], qv[2]])
+         else:
+             # Distribuzione uniforme completa sulla sfera unitaria
+-            random_quaternion = np.random.randn(4)
++            random_quaternion = self.np_random.normal(size=4)
+             random_quaternion /= np.linalg.norm(random_quaternion)
+ 
+         initial_omega = np.array([0.0, 0.0, 0.0])
+@@ -202,6 +233,9 @@ class SatelliteEnv(gym.Env):
+         """
+         Esegue un passo di simulazione applicando l'azione specificata dall'agente.
+         """
++        action = np.asarray(action, dtype=float)
++        if action.shape != (3,) or not np.all(np.isfinite(action)) or np.any(np.abs(action) > 1):
++            raise ValueError("L'azione deve avere tre componenti finite in [-1, 1]")
+         self.current_step += 1
+ 
+         # Conversione azione normalizzata → coppia fisica
+@@ -216,36 +250,55 @@ class SatelliteEnv(gym.Env):
+         q_error = self.dynamics.quaternion_error(current_quaternion, self.target_quaternion)
+         angle_error = 2.0 * np.arccos(np.clip(np.abs(q_error[0]), 0.0, 1.0))
+ 
+-        # ===== CALCOLO DELLA REWARD =====
+-        # 1. Reward per riduzione errore di assetto
+-        max_angle_error = np.pi
+-        normalized_error = np.clip(angle_error / max_angle_error, 0.0, 1.0)
+-        attitude_reward = 10.0 * (1.0 - normalized_error)
+-
+-        # 2. Penalità quadratica per grandi errori
+-        attitude_penalty = -5.0 * (angle_error ** 2)
+-
+-        # 3. Penalità per consumo energetico
++        # Storico 2026-10-18: PPO RMS 101-105 gradi nei due esperimenti
++        # test_20261018_131553 e test_20261018_161240.
++        # max_angle_error = np.pi
++        # normalized_error = np.clip(angle_error / max_angle_error, 0.0, 1.0)
++        # attitude_reward = 10.0 * (1.0 - normalized_error)
++        # attitude_penalty = -5.0 * (angle_error ** 2)
++        # control_effort = np.sum(torques ** 2)
++        # energy_penalty = -0.005 * control_effort
++        # omega_magnitude = np.linalg.norm(current_omega)
++        # max_omega = 1.0
++        # normalized_omega = np.clip(omega_magnitude / max_omega, 0.0, 1.0)
++        # stability_reward = 2.0 * (1.0 - normalized_omega)
++        # reward = attitude_reward + attitude_penalty + energy_penalty + stability_reward
++        # if angle_error < np.deg2rad(2.0) and np.linalg.norm(current_omega) < 0.01:
++        #     reward += 500.0
++        #     terminated = True
++        # La velocita' non era penalizzata ulteriormente oltre 1 rad/s;
++        # il successo interrompeva il mantenimento. Ora si usa un orizzonte
++        # fisso, costo di velocita' non saturato e sforzo normalizzato.
+         control_effort = np.sum(torques ** 2)
+-        energy_penalty = -0.005 * control_effort
+-
+-        # 4. Bonus di stabilità
+         omega_magnitude = np.linalg.norm(current_omega)
+-        max_omega = 1.0
+-        normalized_omega = np.clip(omega_magnitude / max_omega, 0.0, 1.0)
+-        stability_reward = 2.0 * (1.0 - normalized_omega)
+-
+-        reward = attitude_reward + attitude_penalty + energy_penalty + stability_reward
+-
+-        # Condizione di successo
++        attitude_reward = -4.0 * angle_error ** 2
++        stability_reward = -0.5 * omega_magnitude ** 2
++        energy_penalty = -0.01 * control_effort / self.max_torque ** 2
+         success_threshold_angle = np.deg2rad(2.0)
+         success_threshold_omega = 0.01
+-
++        in_target = bool(
++            angle_error < success_threshold_angle
++            and omega_magnitude < success_threshold_omega
++        )
++        self.target_hold_steps = self.target_hold_steps + 1 if in_target else 0
++        # Storico v2 (run_20261018_170417_025854, best a 500k):
++        # reward = attitude_reward + stability_reward + energy_penalty + float(in_target)
++        # Residuo 2.072 gradi, 0/5 successi: a quell'errore il costo angolare
++        # vale solo circa -0.00523 e il bonus di successo resta inaccessibile.
++        # Non e' prova di causalita'; si aggiunge un segnale locale continuo
++        # mantenendo invariati costi, bonus e soglie per isolare questa ipotesi.
++        normalized_angle = angle_error / success_threshold_angle  # Scala fisica: 2 gradi, non radianti grezzi.
++        normalized_omega = omega_magnitude / success_threshold_omega  # Anche la quiete conta: scala 0.01 rad/s.
++        precision_reward = PRECISION_REWARD_WEIGHT / (
++            1.0 + normalized_angle ** 2 + normalized_omega ** 2
++        )  # Forma razionale liscia: massima solo a errore E velocita' nulli, senza una zona piatta oltre soglia.
++        # Circa +0.482 a 2.072 gradi da fermo, +1 al bersaglio; con
++        # omega=0.355 rad/s quasi zero: non premiare di nuovo le oscillazioni.
++        reward = (
++            attitude_reward + stability_reward + energy_penalty
++            + float(in_target) + precision_reward
++        )  # L'unico cambiamento della reward v3 e' il termine di precisione.
+         terminated = False
+-        if angle_error < success_threshold_angle and np.linalg.norm(current_omega) < success_threshold_omega:
+-            reward += 500.0
+-            terminated = True
+-
+         truncated = (self.current_step >= self.max_steps)
+ 
+         info = {
+@@ -253,9 +306,11 @@ class SatelliteEnv(gym.Env):
+             'angle_error_rad': angle_error,
+             'omega_magnitude': np.linalg.norm(current_omega),
+             'control_effort': control_effort,
+-            'success': terminated,
++            'in_target': in_target,
++            'success': self.target_hold_steps >= self.required_hold_steps,
+             'reward_attitude': attitude_reward,
+             'reward_stability': stability_reward,
++            'reward_precision': precision_reward,  # Log separato per distinguere il nuovo segnale dal successo reale.
+             'reward_total': reward
+         }
+ 
+@@ -269,4 +324,3 @@ class SatelliteEnv(gym.Env):
+     def close(self):
+         """Pulizia delle risorse."""
+         pass
+-
+diff --git a/tesi/capitolo4.md b/tesi/capitolo4.md
+index 8c5839a..44cd0dc 100644
+--- a/tesi/capitolo4.md
++++ b/tesi/capitolo4.md
+@@ -1,5 +1,12 @@
+ # Capitolo 4 – Sviluppo dell'Architettura Software e di Simulazione
+ 
++> Nota di revisione, 18 ottobre 2026: il testo sottostante conserva
++> l'implementazione originaria per lo storico. Il codice corrente usa LQR
++> discreto, reward quadratica sulla velocita', mantenimento a orizzonte fisso
++> e valutazione appaiata multi-seed. `experiment_history.py` aggiunge manifest
++> e snapshot dei sorgenti per ogni run. La procedura aggiornata e i limiti
++> sperimentali sono descritti in [RUNBOOK.md](../RUNBOOK.md).
++
+ ## 4.1 Architettura generale del simulatore Python
+ 
+ Il simulatore sviluppato per questa tesi è implementato interamente in Python e si compone di cinque moduli principali, ciascuno con responsabilità ben definite secondo i principi della separazione delle competenze (separation of concerns). L'architettura è progettata per consentire il confronto diretto tra un controllore classico (LQR) e un agente di Deep Reinforcement Learning (PPO) sullo stesso modello dinamico.
+diff --git a/test_and_plot.py b/test_and_plot.py
+index 9661f63..81f3bfb 100644
+--- a/test_and_plot.py
++++ b/test_and_plot.py
+@@ -19,6 +19,11 @@ from __future__ import annotations
+ import glob as glob_module
+ import os
+ import csv
++import argparse
++import hashlib
++import json
++import warnings
++from pathlib import Path
+ from datetime import datetime
+ from typing import Dict, List, Tuple
+ 
+@@ -31,8 +36,9 @@ from stable_baselines3 import PPO
+ from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
+ 
+ from lqr_controller import LQRController
+-from satellite_dynamics import SatelliteDynamics
++from satellite_dynamics import SatelliteDynamics, canonicalize_observation
+ from satellite_env import SatelliteEnv
++from experiment_history import EXPERIMENT_REVISION, save_experiment_manifest
+ 
+ # -----------------------------------------------------------------------------
+ # Configurazione grafica per pubblicazione
+@@ -83,16 +89,61 @@ def resolve_latest_training_run(models_root: str = "models") -> Tuple[str, str]:
+     )
+ 
+ 
+-def load_ppo_model(models_root: str = "models") -> Tuple[PPO, object, str]:
++def load_ppo_model(models_root: str = "models", run_dir=None, allow_legacy=False,
++                   model_kind="final") -> Tuple[PPO, object, str]:
+     """Carica il modello PPO più recente e il normalizzatore."""
+-    model_path, vecnorm_path = resolve_latest_training_run(models_root)
+-    model = PPO.load(model_path)
+-    vec_normalize = None
+-    if os.path.exists(vecnorm_path):
+-        dummy_env = DummyVecEnv([lambda: SatelliteEnv()])
+-        vec_normalize = VecNormalize.load(vecnorm_path, dummy_env)
+-        vec_normalize.training = False
+-        vec_normalize.norm_reward = False
++    if run_dir is None:
++        model_path, vecnorm_path = resolve_latest_training_run(models_root)
++    else:
++        directory = Path(run_dir)
++        if not directory.is_dir():
++            directory = Path(models_root) / run_dir
++        model_path = str(directory / "ppo_satellite_final.zip")
++        vecnorm_path = str(directory / "vec_normalize.pkl")
++    if model_kind not in ("final", "best"):
++        raise ValueError("model_kind deve essere final o best")
++    if model_kind == "best":
++        directory = Path(model_path).parent
++        model_path = str(directory / "ppo_satellite_best.zip")
++        vecnorm_path = str(directory / "best_vec_normalize.pkl")
++        if not os.path.isfile(model_path):
++            raise FileNotFoundError(
++                "Modello best assente: completare un training con --eval-freq > 0 "
++                "oppure richiedere esplicitamente --model final"
++            )
++    manifest_path = Path(model_path).parent / "manifest.json"
++    manifest = None
++    if manifest_path.exists():
++        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
++    if manifest is None or manifest.get("revision") != EXPERIMENT_REVISION:
++        if not allow_legacy:
++            raise ValueError(
++                "Modello storico o revisione diversa: usare --allow-legacy-model "
++                "solo per analisi esplorative, oppure addestrare un nuovo modello."
++            )
++        warnings.warn("Modello storico: il confronto usa una baseline LQR aggiornata.")
++    model = PPO.load(model_path, device="cpu")
++    if model.observation_space.shape != (7,):
++        raise ValueError("La campagna standard richiede osservazioni 7D, non --obs-augmented")
++    model.canonical_observations = bool(
++        manifest and manifest["configuration"].get("canonical_observations", False)
++    )
++    # Storico v1: i test assumevano sempre 0.1 s. Ora anche LQR, sweep
++    # e finestre post-guasto usano il passo fisico registrato nel training.
++    model.control_dt = float(manifest["configuration"]["dt"]) if manifest else 0.1
++    # Storico: l'assenza del normalizzatore produceva un fallback silenzioso.
++    # vec_normalize = None
++    # if os.path.exists(vecnorm_path):
++    #     dummy_env = DummyVecEnv([lambda: SatelliteEnv()])
++    #     vec_normalize = VecNormalize.load(vecnorm_path, dummy_env)
++    #     vec_normalize.training = False
++    #     vec_normalize.norm_reward = False
++    if not os.path.isfile(vecnorm_path):
++        raise FileNotFoundError(f"Normalizzatore obbligatorio mancante: {vecnorm_path}")
++    dummy_env = DummyVecEnv([lambda: SatelliteEnv(dt=model.control_dt)])
++    vec_normalize = VecNormalize.load(vecnorm_path, dummy_env)
++    vec_normalize.training = False
++    vec_normalize.norm_reward = False
+     return model, vec_normalize, model_path
+ 
+ 
+@@ -106,9 +157,9 @@ def normalize_obs_for_ppo(observation: np.ndarray, vec_normalize) -> np.ndarray:
+ 
+ def build_test_directory(prefix: str = "test") -> Tuple[str, str]:
+     """Crea una cartella dedicata al singolo esperimento in tests/."""
+-    test_id = datetime.now().strftime(f"{prefix}_%Y%m%d_%H%M%S")
++    test_id = datetime.now().strftime(f"{prefix}_%Y%m%d_%H%M%S_%f")
+     test_dir = os.path.join("tests", test_id)
+-    os.makedirs(test_dir, exist_ok=True)
++    os.makedirs(test_dir, exist_ok=False)
+     return test_id, test_dir
+ 
+ 
+@@ -137,7 +188,7 @@ def run_simulation(
+     controller_type: str,
+     initial_state: np.ndarray,
+     total_time: float = 60.0,
+-    dt: float = 0.1,
++    dt: float | None = None,
+     fault_time: float | None = None,
+     fault_loss: float = 0.0,
+     fault_axis: int = 0,
+@@ -145,6 +196,7 @@ def run_simulation(
+     disturbances: dict | None = None,
+     model: PPO | None = None,
+     vec_normalize=None,
++    seed: int = 42,
+ ) -> Dict[str, np.ndarray]:
+     """
+     Esegue una simulazione in anello chiuso con configurazione flessibile.
+@@ -165,24 +217,45 @@ def run_simulation(
+     Returns:
+         Dict con time, angle_error, omega, torques, states
+     """
+-    num_steps = int(total_time / dt)
++    if dt is None:
++        dt = getattr(model, "control_dt", 0.1)
++    if controller_type not in ("LQR", "PPO"):
++        raise ValueError("controller_type deve essere LQR o PPO")
++    if controller_type == "PPO" and model is None:
++        raise ValueError("Il controllore PPO richiede un modello")
++    if not np.isfinite(dt) or dt <= 0 or not np.isfinite(total_time) or total_time < 2 * dt:
++        raise ValueError("Richiesti dt positivo e almeno due passi di simulazione")
++    if not 0 <= fault_loss <= 1 or fault_axis not in (0, 1, 2):
++        raise ValueError("Guasto non valido")
++    if not np.isfinite(sensor_noise_std) or sensor_noise_std < 0:
++        raise ValueError("sensor_noise_std deve essere finito e non negativo")
++    num_steps = int(round(total_time / dt))
++    if not np.isclose(num_steps * dt, total_time):
++        raise ValueError("total_time deve essere un multiplo di dt")
+     fault_step = int(fault_time / dt) if fault_time is not None else num_steps + 1
+ 
+-    dynamics = SatelliteDynamics(disturbances=disturbances)
++    # Storico: np.random globale forniva rumori diversi ai due controllori.
++    # Stream separati rendono identici misura e disturbo per ogni coppia.
++    sensor_seed, dynamics_seed = np.random.SeedSequence(seed).spawn(2)
++    sensor_rng = np.random.default_rng(sensor_seed)
++    dynamics = SatelliteDynamics(
++        disturbances=disturbances, rng=np.random.default_rng(dynamics_seed)
++    )
+     dynamics.reset(initial_state)
+ 
+-    controller = LQRController(max_torque=0.05) if controller_type == "LQR" else None
++    controller = LQRController(max_torque=0.05, dt=dt) if controller_type == "LQR" else None
+     max_torque = 0.05
+     target_quat = np.array([1.0, 0.0, 0.0, 0.0])
+ 
+-    # Storage
+-    time_hist = np.zeros(num_steps)
+-    angle_error_hist = np.zeros(num_steps)
+-    omega_hist = np.zeros((num_steps, 3))
++    # Storico: range(num_steps) escludeva lo stato finale a total_time.
++    # N coppie ZOH governano N intervalli; si registrano tutti gli N+1 stati.
++    time_hist = np.zeros(num_steps + 1)
++    angle_error_hist = np.zeros(num_steps + 1)
++    omega_hist = np.zeros((num_steps + 1, 3))
+     torques_hist = np.zeros((num_steps, 3))
+-    states_hist = np.zeros((num_steps, 7))
++    states_hist = np.zeros((num_steps + 1, 7))
+ 
+-    for step in range(num_steps):
++    for step in range(num_steps + 1):
+         time_hist[step] = step * dt
+         state = dynamics.state.copy()
+         states_hist[step] = state
+@@ -193,11 +266,14 @@ def run_simulation(
+             2.0 * np.arccos(np.clip(np.abs(q_error[0]), 0.0, 1.0))
+         )
+         omega_hist[step] = state[4:]
++        if step == num_steps:
++            break
+ 
+         # Osservazione (con eventuale rumore)
+         obs = state.copy()
+         if sensor_noise_std > 0.0:
+-            obs += np.random.normal(0.0, sensor_noise_std, size=obs.shape)
++            # obs += np.random.normal(0.0, sensor_noise_std, size=obs.shape)
++            obs += sensor_rng.normal(0.0, sensor_noise_std, size=obs.shape)
+             q_norm = np.linalg.norm(obs[:4])
+             if q_norm > 1e-10:
+                 obs[:4] /= q_norm
+@@ -206,6 +282,8 @@ def run_simulation(
+         if controller_type == "LQR":
+             commanded_torque = controller.compute_control(obs)
+         else:
++            if getattr(model, "canonical_observations", True):
++                obs = canonicalize_observation(obs)
+             normalized_obs = normalize_obs_for_ppo(obs.astype(np.float32), vec_normalize)
+             action, _ = model.predict(normalized_obs, deterministic=True)
+             commanded_torque = action[0] * max_torque
+@@ -231,18 +309,35 @@ def run_simulation(
+ # METRICHE QUANTITATIVE
+ # =============================================================================
+ 
+-def compute_metrics(data: Dict[str, np.ndarray], settling_threshold_deg: float = 2.0) -> Dict[str, float]:
++def compute_metrics(data: Dict[str, np.ndarray], settling_threshold_deg: float = 2.0,
++                    hold_time_s: float = 10.0) -> Dict[str, float]:
+     """Calcola metriche di prestazione da una simulazione."""
+     angle_error = data["angle_error"]
+     torques = data["torques"]
+     time = data["time"]
+ 
+     # Settling time: primo istante dopo il quale l'errore rimane sotto soglia
+-    settling_time = time[-1]  # Default: non converge
+-    for i in range(len(angle_error)):
+-        if np.all(angle_error[i:] < settling_threshold_deg):
+-            settling_time = time[i]
+-            break
++    # Storico: confondeva fallimento e convergenza.
++    # settling_time = time[-1]
++    # for i in range(len(angle_error)):
++    #     if np.all(angle_error[i:] < settling_threshold_deg):
++    #         settling_time = time[i]
++    #         break
++    # Un singolo campione finale sotto soglia non dimostra mantenimento.
++    dt = float(time[1] - time[0])
++    hold_steps = int(np.ceil(hold_time_s / dt)) + 1
++    below_threshold = angle_error < settling_threshold_deg
++    persistent = np.logical_and.accumulate(below_threshold[::-1])[::-1]
++    candidates = np.flatnonzero(persistent)
++    settling_time = float("nan")
++    if len(candidates) and len(time) - candidates[0] >= hold_steps:
++        settling_time = float(time[candidates[0]])
++    omega_norm = np.linalg.norm(data["omega"], axis=1)
++    success = bool(
++        len(time) >= hold_steps
++        and np.all(below_threshold[-hold_steps:])
++        and np.all(omega_norm[-hold_steps:] < 0.01)
++    )
+ 
+     # Errore RMS totale
+     rms_error = float(np.sqrt(np.mean(np.square(angle_error))))
+@@ -267,6 +362,9 @@ def compute_metrics(data: Dict[str, np.ndarray], settling_threshold_deg: float =
+         "energy_consumption": energy,
+         "peak_torque_Nm": peak_torque,
+         "omega_max_rad_s": omega_max,
++        "settled": bool(np.isfinite(settling_time)),
++        "success": success,
++        "target_fraction": float(np.mean(below_threshold & (omega_norm < 0.01))),
+     }
+ 
+ 
+@@ -280,15 +378,15 @@ def compute_rms_post_fault(angle_error: np.ndarray, fault_step: int) -> float:
+ # TEST 1: SCENARIO NOMINALE LINEARE (PICCOLI ANGOLI)
+ # =============================================================================
+ 
+-def run_test1(model, vec_normalize, test_dir: str) -> Dict[str, Dict]:
++def run_test1(model, vec_normalize, test_dir: str, seed: int = 42) -> Dict[str, Dict]:
+     """Test 1: Scenario nominale con piccola perturbazione (~15°)."""
+     print("[TEST 1] Scenario nominale lineare (15°)")
+ 
+-    initial_state = generate_initial_state(angle_deg=15.0, seed=42)
++    initial_state = generate_initial_state(angle_deg=15.0, seed=seed)
+ 
+-    lqr_data = run_simulation("LQR", initial_state, total_time=60.0)
++    lqr_data = run_simulation("LQR", initial_state, total_time=60.0, seed=seed, model=model)
+     ppo_data = run_simulation("PPO", initial_state, total_time=60.0,
+-                              model=model, vec_normalize=vec_normalize)
++                              model=model, vec_normalize=vec_normalize, seed=seed)
+ 
+     lqr_metrics = compute_metrics(lqr_data)
+     ppo_metrics = compute_metrics(ppo_data)
+@@ -313,10 +411,10 @@ def run_test1(model, vec_normalize, test_dir: str) -> Dict[str, Dict]:
+     # Panel 2: Coppie di controllo
+     ax2 = fig.add_subplot(gs[1])
+     for i, axis_name in enumerate(["X", "Y", "Z"]):
+-        ax2.plot(lqr_data["time"], lqr_data["torques"][:, i] * 1000,
++        ax2.plot(lqr_data["time"][:-1], lqr_data["torques"][:, i] * 1000,
+                  linestyle="-", alpha=0.7, label=f"LQR {axis_name}")
+     for i, axis_name in enumerate(["X", "Y", "Z"]):
+-        ax2.plot(ppo_data["time"], ppo_data["torques"][:, i] * 1000,
++        ax2.plot(ppo_data["time"][:-1], ppo_data["torques"][:, i] * 1000,
+                  linestyle="--", alpha=0.7, label=f"PPO {axis_name}")
+     ax2.set_xlabel("Tempo [s]")
+     ax2.set_ylabel("Coppia [mN·m]")
+@@ -352,15 +450,15 @@ def run_test1(model, vec_normalize, test_dir: str) -> Dict[str, Dict]:
+ # TEST 2: REGIME NON LINEARE (GRANDI ANGOLI)
+ # =============================================================================
+ 
+-def run_test2(model, vec_normalize, test_dir: str) -> Dict[str, Dict]:
++def run_test2(model, vec_normalize, test_dir: str, seed: int = 42) -> Dict[str, Dict]:
+     """Test 2: Grande angolo di manovra (120°) – regime non lineare."""
+     print("[TEST 2] Regime non lineare (120°)")
+ 
+-    initial_state = generate_initial_state(angle_deg=120.0, seed=42)
++    initial_state = generate_initial_state(angle_deg=120.0, seed=seed)
+ 
+-    lqr_data = run_simulation("LQR", initial_state, total_time=80.0)
++    lqr_data = run_simulation("LQR", initial_state, total_time=80.0, seed=seed, model=model)
+     ppo_data = run_simulation("PPO", initial_state, total_time=80.0,
+-                              model=model, vec_normalize=vec_normalize)
++                              model=model, vec_normalize=vec_normalize, seed=seed)
+ 
+     lqr_metrics = compute_metrics(lqr_data)
+     ppo_metrics = compute_metrics(ppo_data)
+@@ -386,11 +484,14 @@ def run_test2(model, vec_normalize, test_dir: str) -> Dict[str, Dict]:
+ 
+     # Panel 2: Coppie
+     ax2 = fig.add_subplot(gs[1])
+-    ax2.plot(lqr_data["time"], np.linalg.norm(lqr_data["torques"], axis=1) * 1000,
++    ax2.plot(lqr_data["time"][:-1], np.linalg.norm(lqr_data["torques"], axis=1) * 1000,
+              label="LQR ||τ||", color="tab:blue")
+-    ax2.plot(ppo_data["time"], np.linalg.norm(ppo_data["torques"], axis=1) * 1000,
++    ax2.plot(ppo_data["time"][:-1], np.linalg.norm(ppo_data["torques"], axis=1) * 1000,
+              label="PPO ||τ||", color="tab:red")
+-    ax2.axhline(50.0, color="gray", linestyle=":", alpha=0.7, label="Saturazione (50 mN·m)")
++    # Storico: 50 mN m e' il limite per asse, non della norma tridimensionale.
++    # ax2.axhline(50.0, ...)
++    ax2.axhline(np.sqrt(3) * 50.0, color="gray", linestyle=":", alpha=0.7,
++                label="Limite norma (sqrt(3) x 50 mN m)")
+     ax2.set_xlabel("Tempo [s]")
+     ax2.set_ylabel("||Coppia|| [mN·m]")
+     ax2.set_title("Test 2 — Norma della Coppia di Controllo")
+@@ -425,13 +526,14 @@ def run_test2(model, vec_normalize, test_dir: str) -> Dict[str, Dict]:
+ # TEST 3: ROBUSTEZZA (RUMORE + GUASTI)
+ # =============================================================================
+ 
+-def run_test3(model, vec_normalize, test_dir: str) -> Dict[str, Dict]:
++def run_test3(model, vec_normalize, test_dir: str, seed: int = 42) -> Dict[str, Dict]:
+     """Test 3: Analisi di robustezza con rumore sui sensori e guasti attuatori."""
+     print("[TEST 3] Analisi di robustezza")
+ 
+-    initial_state = generate_initial_state(angle_deg=45.0, seed=42)
++    initial_state = generate_initial_state(angle_deg=45.0, seed=seed)
+     fault_time = 20.0
+-    dt = 0.1
++    # Storico v1: dt = 0.1, indipendente dal passo del modello.
++    dt = getattr(model, "control_dt", 0.1)
+     total_time = 60.0
+ 
+     # --- PARTE A: Sweep guasti con rumore fisso ---
+@@ -446,11 +548,11 @@ def run_test3(model, vec_normalize, test_dir: str) -> Dict[str, Dict]:
+     for fl in fault_levels:
+         lqr_data = run_simulation("LQR", initial_state, total_time=total_time,
+                                   fault_time=fault_time, fault_loss=float(fl),
+-                                  sensor_noise_std=noise_level)
++                                  sensor_noise_std=noise_level, seed=seed, dt=dt)
+         ppo_data = run_simulation("PPO", initial_state, total_time=total_time,
+                                   fault_time=fault_time, fault_loss=float(fl),
+                                   sensor_noise_std=noise_level,
+-                                  model=model, vec_normalize=vec_normalize)
++                                  model=model, vec_normalize=vec_normalize, seed=seed)
+         lqr_rms.append(compute_rms_post_fault(lqr_data["angle_error"], fault_step))
+         ppo_rms.append(compute_rms_post_fault(ppo_data["angle_error"], fault_step))
+ 
+@@ -468,26 +570,34 @@ def run_test3(model, vec_normalize, test_dir: str) -> Dict[str, Dict]:
+     for nl in noise_levels:
+         lqr_data = run_simulation("LQR", initial_state, total_time=total_time,
+                                   fault_time=fault_time, fault_loss=fixed_fault,
+-                                  sensor_noise_std=float(nl))
++                                  sensor_noise_std=float(nl), seed=seed, dt=dt)
+         ppo_data = run_simulation("PPO", initial_state, total_time=total_time,
+                                   fault_time=fault_time, fault_loss=fixed_fault,
+                                   sensor_noise_std=float(nl),
+-                                  model=model, vec_normalize=vec_normalize)
++                                  model=model, vec_normalize=vec_normalize, seed=seed)
+         lqr_rms_noise.append(compute_rms_post_fault(lqr_data["angle_error"], fault_step))
+         ppo_rms_noise.append(compute_rms_post_fault(ppo_data["angle_error"], fault_step))
+ 
+     lqr_rms_noise = np.array(lqr_rms_noise)
+     ppo_rms_noise = np.array(ppo_rms_noise)
++    with open(os.path.join(test_dir, "robustezza_sweep.csv"), "w", newline="") as handle:
++        writer = csv.writer(handle)
++        writer.writerow(["sweep", "fault_loss", "sensor_noise_std", "seed",
++                         "lqr_post_fault_rms_deg", "ppo_post_fault_rms_deg"])
++        for fl, lqr_rms_value, ppo_rms_value in zip(fault_levels, lqr_rms, ppo_rms):
++            writer.writerow(["fault", fl, noise_level, seed, lqr_rms_value, ppo_rms_value])
++        for nl, lqr_rms_value, ppo_rms_value in zip(noise_levels, lqr_rms_noise, ppo_rms_noise):
++            writer.writerow(["noise", fixed_fault, nl, seed, lqr_rms_value, ppo_rms_value])
+ 
+     # --- PARTE C: Simulazione singola con guasto 70% per visualizzazione traiettoria ---
+     print("  [3c] Simulazione traiettoria con guasto 70%...")
+     lqr_traj = run_simulation("LQR", initial_state, total_time=total_time,
+                               fault_time=fault_time, fault_loss=0.7,
+-                              sensor_noise_std=noise_level)
++                              sensor_noise_std=noise_level, seed=seed, dt=dt)
+     ppo_traj = run_simulation("PPO", initial_state, total_time=total_time,
+                               fault_time=fault_time, fault_loss=0.7,
+                               sensor_noise_std=noise_level,
+-                              model=model, vec_normalize=vec_normalize)
++                              model=model, vec_normalize=vec_normalize, seed=seed)
+ 
+     # --- FIGURA 3A: Sweep guasti ---
+     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+@@ -501,9 +611,11 @@ def run_test3(model, vec_normalize, test_dir: str) -> Dict[str, Dict]:
+     ax1.grid(True)
+     ax1.set_xlim(-2, 92)
+ 
+-    ax2.plot(noise_levels * 100, lqr_rms_noise, "o-", color="tab:blue", label="LQR", markersize=7)
+-    ax2.plot(noise_levels * 100, ppo_rms_noise, "s-", color="tab:red", label="PPO", markersize=7)
+-    ax2.set_xlabel("Rumore sensori σ [% dello stato]")
++    # Storico: noise_levels * 100 era etichettato come percentuale dello stato,
++    # ma sigma e' additivo su quaternioni e velocita' (unita' diverse).
++    ax2.plot(noise_levels, lqr_rms_noise, "o-", color="tab:blue", label="LQR", markersize=7)
++    ax2.plot(noise_levels, ppo_rms_noise, "s-", color="tab:red", label="PPO", markersize=7)
++    ax2.set_xlabel("Rumore additivo sigma [componenti q; omega in rad/s]")
+     ax2.set_ylabel("Errore RMS post-guasto [°]")
+     ax2.set_title("Test 3b — Robustezza al Rumore sui Sensori\n(guasto attuatore 50%)")
+     ax2.legend()
+@@ -534,9 +646,9 @@ def run_test3(model, vec_normalize, test_dir: str) -> Dict[str, Dict]:
+     ax1.set_ylim(bottom=0)
+ 
+     ax2 = fig.add_subplot(gs[1])
+-    ax2.plot(lqr_traj["time"], lqr_traj["torques"][:, 0] * 1000,
++    ax2.plot(lqr_traj["time"][:-1], lqr_traj["torques"][:, 0] * 1000,
+              label="LQR (asse X)", color="tab:blue")
+-    ax2.plot(ppo_traj["time"], ppo_traj["torques"][:, 0] * 1000,
++    ax2.plot(ppo_traj["time"][:-1], ppo_traj["torques"][:, 0] * 1000,
+              label="PPO (asse X)", color="tab:red")
+     ax2.axvline(fault_time, color="black", linestyle="--", linewidth=1.5)
+     ax2.set_xlabel("Tempo [s]")
+@@ -572,23 +684,30 @@ def save_summary_table(all_results: Dict[str, Dict], test_dir: str) -> None:
+         writer = csv.writer(f)
+         writer.writerow(["Test", "Controllore", "Settling Time [s]", "RMS Error [°]",
+                          "Steady-State Error [°]", "Energia", "Coppia Picco [N·m]",
+-                         "ω max [rad/s]"])
++                         "ω max [rad/s]", "Settled", "Success 10s", "Target fraction"])
+         for test_name, results in all_results.items():
+             for ctrl_name, metrics in results.items():
+                 writer.writerow([
+                     test_name, ctrl_name.upper(),
+-                    f"{metrics['settling_time_s']:.2f}",
++                    format_settling_time(metrics["settling_time_s"]),
+                     f"{metrics['rms_error_deg']:.2f}",
+                     f"{metrics['steady_state_error_deg']:.3f}",
+                     f"{metrics['energy_consumption']:.6f}",
+                     f"{metrics['peak_torque_Nm']:.4f}",
+                     f"{metrics['omega_max_rad_s']:.4f}",
++                    metrics["settled"], metrics["success"], metrics["target_fraction"],
+                 ])
+ 
+     # Testo formattato per stampa
+     txt_path = os.path.join(test_dir, "metriche_comparative.txt")
+     with open(txt_path, "w") as f:
+-        header = f"{'Test':<20} {'Ctrl':<5} {'T_set [s]':<10} {'RMS [°]':<10} {'SS err [°]':<11} {'Energia':<12} {'τ_max [Nm]':<11} {'ω_max [r/s]':<11}"
++        handle_note = (
++            "N/C = non converge sotto 2 gradi per almeno gli ultimi 10 s.\n"
++            "Success = anche ||omega|| < 0.01 rad/s negli ultimi 10 s.\n"
++            "Energia = integrale ||tau applicata||^2 dt [N^2 m^2 s], non joule.\n"
++        )
++        f.write(handle_note)
++        header = f"{'Test':<20} {'Ctrl':<5} {'T_set [s]':<10} {'RMS [°]':<10} {'SS err [°]':<11} {'Energia':<12} {'τ_max [Nm]':<11} {'ω_max [r/s]':<11} {'Success':<8}"
+         separator = "-" * len(header)
+         f.write(header + "\n")
+         f.write(separator + "\n")
+@@ -600,12 +719,13 @@ def save_summary_table(all_results: Dict[str, Dict], test_dir: str) -> None:
+         for test_name, results in all_results.items():
+             for ctrl_name, metrics in results.items():
+                 line = (f"{test_name:<20} {ctrl_name.upper():<5} "
+-                        f"{metrics['settling_time_s']:<10.2f} "
++                        f"{format_settling_time(metrics['settling_time_s']):<10} "
+                         f"{metrics['rms_error_deg']:<10.2f} "
+                         f"{metrics['steady_state_error_deg']:<11.3f} "
+                         f"{metrics['energy_consumption']:<12.6f} "
+                         f"{metrics['peak_torque_Nm']:<11.4f} "
+-                        f"{metrics['omega_max_rad_s']:<11.4f}")
++                        f"{metrics['omega_max_rad_s']:<11.4f} "
++                        f"{str(metrics['success']):<8}")
+                 f.write(line + "\n")
+                 print(line)
+         print(f"{'='*70}")
+@@ -618,6 +738,73 @@ def save_summary_table(all_results: Dict[str, Dict], test_dir: str) -> None:
+ # ENTRY POINT
+ # =============================================================================
+ 
++def format_settling_time(value: float) -> str:
++    return f"{value:.2f}" if np.isfinite(value) else "N/C"
++
++
++def run_repeated_evaluation(model, vec_normalize, test_dir, seed, episodes):
++    """Valutazioni appaiate: stessi assi iniziali e stessi rumori per LQR/PPO."""
++    scenarios = (
++        ("nominale", 15.0, 60.0, {}),
++        ("non_lineare", 120.0, 80.0, {}),
++        ("guasto", 45.0, 60.0,
++         {"fault_time": 20.0, "fault_loss": 0.7, "sensor_noise_std": 0.005}),
++    )
++    rows = []
++    for name, angle, duration, options in scenarios:
++        for episode in range(episodes):
++            episode_seed = seed + episode
++            initial = generate_initial_state(angle, seed=episode_seed)
++            for controller in ("LQR", "PPO"):
++                data = run_simulation(
++                    controller, initial, total_time=duration, seed=episode_seed,
++                    model=model, vec_normalize=vec_normalize, **options
++                )
++                metrics = compute_metrics(data)
++                if "fault_time" in options:
++                    metrics["post_fault_rms_deg"] = compute_rms_post_fault(
++                        data["angle_error"],
++                        int(options["fault_time"] / getattr(model, "control_dt", 0.1))
++                    )
++                else:
++                    metrics["post_fault_rms_deg"] = None
++                rows.append({"scenario": name, "controller": controller,
++                             "seed": episode_seed, **metrics})
++                np.savez_compressed(
++                    os.path.join(test_dir, f"{name}_{controller}_seed{episode_seed}.npz"),
++                    **data
++                )
++        print(f"[REPLICHE] {name}: {episodes} condizioni iniziali per controllore")
++    with open(os.path.join(test_dir, "episodi.csv"), "w", newline="") as handle:
++        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
++        writer.writeheader()
++        for row in rows:
++            writer.writerow({
++                key: ("N/C" if isinstance(value, float) and not np.isfinite(value) else value)
++                for key, value in row.items()
++            })
++    with open(os.path.join(test_dir, "statistiche.csv"), "w", newline="") as handle:
++        writer = csv.writer(handle)
++        writer.writerow(["scenario", "controller", "metric", "n_valid", "n_total",
++                         "mean", "std_sample"])
++        for name, _, _, _ in scenarios:
++            for controller in ("LQR", "PPO"):
++                group = [row for row in rows
++                         if row["scenario"] == name and row["controller"] == controller]
++                for metric in sorted(group[0].keys() - {"scenario", "controller", "seed"}):
++                    values = np.array([row[metric] for row in group], dtype=float)
++                    values = values[np.isfinite(values)]
++                    # I fallimenti non entrano nella media del settling time:
++                    # n_valid/n_total e success rate impediscono di nasconderli.
++                    writer.writerow([
++                        name, controller, metric, len(values), episodes,
++                        float(np.mean(values)) if len(values) else (
++                            "N/A" if all(row[metric] is None for row in group) else "N/C"
++                        ),
++                        float(np.std(values, ddof=1)) if len(values) > 1 else "N/A",
++                    ])
++
++
+ def main() -> None:
+     """Esegue la campagna sperimentale completa (Cap. 5 della tesi)."""
+     print("=" * 70)
+@@ -626,31 +813,70 @@ def main() -> None:
+     print("=" * 70)
+     print()
+ 
++    parser = argparse.ArgumentParser(description="Campagna LQR/PPO riproducibile")
++    parser.add_argument("--run", help="Nome o percorso della cartella del training")
++    parser.add_argument("--model", choices=("final", "best"), default="final",
++                        help="Modello finale oppure selezionato su validazione fisica")
++    parser.add_argument("--seed", type=int, default=1000, help="Seed di valutazione, distinto dal training")
++    parser.add_argument("--episodes", type=int, default=5, help="Condizioni iniziali per scenario")
++    parser.add_argument("--allow-legacy-model", action="store_true",
++                        help="Consenti modelli storici per analisi esplorativa")
++    args = parser.parse_args()
++    if args.episodes <= 0 or args.seed < 0:
++        parser.error("episodes deve essere positivo e seed non negativo")
++    model, vec_normalize, model_path = load_ppo_model(
++        run_dir=args.run, allow_legacy=args.allow_legacy_model, model_kind=args.model
++    )
+     # Setup
+     test_id, test_dir = build_test_directory()
+     print(f"[INFO] Cartella risultati: {test_dir}/")
+ 
+-    try:
+-        model, vec_normalize, model_path = load_ppo_model()
+-    except FileNotFoundError as exc:
+-        print(f"[ERRORE] {exc}")
+-        return
++    # Storico: il catch FileNotFoundError terminava con exit code di successo.
++    # try:
++    #     model, vec_normalize, model_path = load_ppo_model()
++    # except FileNotFoundError as exc:
++    #     print(f"[ERRORE] {exc}")
++    #     return
++    # Gli errori di caricamento ora sono propagati prima di creare risultati.
++    model_file = Path(model_path)
++    normalizer_file = model_file.parent / (
++        "best_vec_normalize.pkl" if args.model == "best" else "vec_normalize.pkl"
++    )
++    training_manifest = model_file.parent / "manifest.json"
++    save_experiment_manifest(test_dir, {
++        **vars(args), "model_path": str(model_file.resolve()),
++        "model_sha256": hashlib.sha256(model_file.read_bytes()).hexdigest(),
++        "normalizer_sha256": hashlib.sha256(normalizer_file.read_bytes()).hexdigest(),
++        "training_manifest": (
++            json.loads(training_manifest.read_text(encoding="utf-8"))
++            if training_manifest.exists() else None
++        ),
++        "best_validation": (
++            json.loads((model_file.parent / "best_validation.json").read_text(encoding="utf-8"))
++            if args.model == "best" else None
++        ),
++        "dt": model.control_dt, "success_angle_deg": 2.0, "success_omega_rad_s": 0.01,
++        "hold_time_s": 10.0, "plots_seed": args.seed,
++        "evaluation_seeds": list(range(args.seed, args.seed + args.episodes)),
++    })
+ 
+     print(f"[INFO] Modello PPO caricato: {model_path}")
++    print(f"[INFO] Passo di controllo comune LQR/PPO: {model.control_dt} s")
+     print()
+ 
+     # Esecuzione dei 3 test
+     all_results = {}
+ 
+-    all_results["Test 1 (15°)"] = run_test1(model, vec_normalize, test_dir)
++    all_results["Test 1 (15°)"] = run_test1(model, vec_normalize, test_dir, seed=args.seed)
+     print()
+-    all_results["Test 2 (120°)"] = run_test2(model, vec_normalize, test_dir)
++    all_results["Test 2 (120°)"] = run_test2(model, vec_normalize, test_dir, seed=args.seed)
+     print()
+-    all_results["Test 3 (Robust.)"] = run_test3(model, vec_normalize, test_dir)
++    all_results["Test 3 (Robust.)"] = run_test3(model, vec_normalize, test_dir, seed=args.seed)
+     print()
+ 
+     # Tabella riassuntiva
+     save_summary_table(all_results, test_dir)
++    run_repeated_evaluation(model, vec_normalize, test_dir, args.seed, args.episodes)
+ 
+     # Chiusura
+     print()
+diff --git a/train.py b/train.py
+index 1d9af34..936d54b 100644
+--- a/train.py
++++ b/train.py
+@@ -17,17 +17,132 @@ Tesi Magistrale in Ingegneria Informatica
+ import os
+ import argparse
+ import importlib.util
++import json
++from collections import defaultdict
+ from datetime import datetime
+ 
+-import numpy as np  # noqa: F401  (usato implicitamente da SB3/gymnasium)
++import numpy as np
+ from stable_baselines3 import PPO
+ from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
+-from stable_baselines3.common.callbacks import CheckpointCallback
++from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback
+ from stable_baselines3.common.monitor import Monitor
+-from satellite_env import SatelliteEnv
+-
+-
+-def make_env(domain_rand=False, sensor_noise=0.0, disturbances=False, obs_augmented=False):
++from satellite_env import SatelliteEnv, PRECISION_REWARD_WEIGHT
++from experiment_history import save_experiment_manifest
++
++
++class ControlMetricsCallback(BaseCallback):
++    """Affianca alla reward le grandezze fisiche e il successo a fine episodio."""
++
++    def __init__(self):
++        super().__init__()
++        self.samples = defaultdict(list)
++
++    def _on_step(self):
++        for info, done in zip(self.locals["infos"], self.locals["dones"]):
++            for key in ("angle_error_deg", "omega_magnitude", "in_target", "reward_precision"):
++                self.samples[key].append(float(info[key]))
++            if done:
++                self.samples["episode_success"].append(float(info["success"]))
++        return True
++
++    def _on_rollout_end(self):
++        for key, values in self.samples.items():
++            self.logger.record(f"control/{key}", float(np.mean(values)))
++        self.samples.clear()
++
++
++class PhysicalValidationCallback(BaseCallback):
++    """Seleziona checkpoint su seed di validazione senza modificare VecNormalize."""
++
++    def __init__(self, output_dir, frequency, episodes, seed, dt, episode_seconds):
++        super().__init__()
++        self.output_dir = output_dir
++        self.frequency = frequency
++        self.episodes = episodes
++        self.seed = seed
++        self.dt = dt
++        self.episode_seconds = episode_seconds
++        self.best_score = None
++
++    @staticmethod
++    def selection_score(success_rate, tail_error, control_effort):
++        # Storico v1: si conservava solo il finale; nel pilota il checkpoint
++        # 100k puntava meglio di quello 301k, ma nessuno manteneva l'assetto.
++        # La reward di training non e' il criterio di selezione.
++        return (success_rate, -tail_error, -control_effort)
++
++    def _evaluate(self, phase):
++        from test_and_plot import compute_metrics, generate_initial_state, run_simulation
++
++        normalizer = self.model.get_vec_normalize_env()
++        if normalizer is None:
++            raise RuntimeError("La validazione richiede VecNormalize del training")
++        rows = []
++        for angle in (15.0, 120.0):
++            duration = max(self.episode_seconds, 80.0 if angle == 120.0 else 60.0)
++            for seed in range(self.seed, self.seed + self.episodes):
++                data = run_simulation(
++                    "PPO", generate_initial_state(angle, seed), total_time=duration,
++                    dt=self.dt, seed=seed, model=self.model, vec_normalize=normalizer
++                )
++                metrics = compute_metrics(data)
++                tail = data["time"] >= duration - 10.0
++                tail_angle = float(np.mean(data["angle_error"][tail]))
++                tail_omega = float(np.mean(np.linalg.norm(data["omega"][tail], axis=1)))
++                rows.append({
++                    "angle_deg": angle, "seed": seed, "duration_s": duration,
++                    "success": metrics["success"], "rms_error_deg": metrics["rms_error_deg"],
++                    "settling_time_s": (
++                        metrics["settling_time_s"] if metrics["settled"] else None
++                    ),
++                    "tail_angle_deg": tail_angle, "tail_omega_rad_s": tail_omega,
++                    "tail_normalized_error": tail_angle / 2.0 + tail_omega / 0.01,
++                    "control_effort": metrics["energy_consumption"],
++                })
++        success_rate = float(np.mean([row["success"] for row in rows]))
++        tail_error = float(np.mean([row["tail_normalized_error"] for row in rows]))
++        effort = float(np.mean([row["control_effort"] for row in rows]))
++        score = self.selection_score(success_rate, tail_error, effort)
++        improved = self.best_score is None or score > self.best_score
++        record = {
++            "timesteps": self.num_timesteps, "phase": phase, "dt": self.dt,
++            "success_rate": success_rate, "tail_normalized_error": tail_error,
++            "control_effort": effort, "selection_score": score, "new_best": improved,
++            "episodes": rows,
++        }
++        with open(os.path.join(self.output_dir, "validation_history.jsonl"), "a",
++                  encoding="utf-8") as handle:
++            handle.write(json.dumps(record, allow_nan=False) + "\n")
++        for key, value in (
++            ("success_rate", success_rate), ("tail_normalized_error", tail_error),
++            ("tail_angle_deg", float(np.mean([row["tail_angle_deg"] for row in rows]))),
++            ("tail_omega_rad_s", float(np.mean([row["tail_omega_rad_s"] for row in rows]))),
++        ):
++            self.logger.record(f"validation/{key}", value)
++        print(f"[VALIDAZIONE] step={self.num_timesteps} successo={success_rate:.1%} "
++              f"errore normalizzato={tail_error:.3f} nuovo_best={improved}")
++        if improved:
++            self.best_score = score
++            self.model.save(os.path.join(self.output_dir, "ppo_satellite_best"))
++            normalizer.save(os.path.join(self.output_dir, "best_vec_normalize.pkl"))
++            with open(os.path.join(self.output_dir, "best_validation.json"), "w",
++                      encoding="utf-8") as handle:
++                json.dump(record, handle, indent=2, allow_nan=False)
++
++    def _on_step(self):
++        if self.n_calls % self.frequency == 0:
++            self._evaluate("periodic")
++        return True
++
++    def _on_training_end(self):
++        # La valutazione nell'ultimo on_step precede l'aggiornamento PPO:
++        # valutare ancora qui include anche i pesi dopo l'ultimo update.
++        self._evaluate("final")
++        self.logger.dump(self.num_timesteps)
++
++
++def make_env(domain_rand=False, sensor_noise=0.0, disturbances=False, obs_augmented=False,
++             dt=0.1, episode_seconds=60.0):
+     """
+     Factory function per la creazione dell'ambiente satellitare.
+ 
+@@ -36,6 +151,8 @@ def make_env(domain_rand=False, sensor_noise=0.0, disturbances=False, obs_augmen
+         sensor_noise (float): Deviazione standard del rumore sui sensori
+         disturbances (bool): Attiva i disturbi ambientali
+         obs_augmented (bool): Attiva l'observation augmentation
++        dt (float): Periodo di controllo [s].
++        episode_seconds (float): Durata fisica di ogni episodio [s].
+ 
+     Returns:
+         callable: Funzione che istanzia un ambiente wrappato con Monitor
+@@ -52,18 +169,35 @@ def make_env(domain_rand=False, sensor_noise=0.0, disturbances=False, obs_augmen
+ 
+         env = SatelliteEnv(
+             max_torque=0.05,
+-            dt=0.1,
+-            max_steps=600,
++            # Storico v1: dt=0.1, max_steps=600.
++            # Il pilota a 300k oscillava a ogni campione; variare dt deve
++            # mantenere la durata fisica dell'episodio, non i suoi 600 step.
++            dt=dt,
++            max_steps=episode_steps(dt, episode_seconds),
+             domain_randomization=domain_rand,
+             sensor_noise_std=sensor_noise,
+             disturbances=dist_config,
+             observation_augmented=obs_augmented
+         )
+-        env = Monitor(env)
++        env = Monitor(
++            env, info_keywords=("success", "angle_error_deg", "omega_magnitude")
++        )
+         return env
+     return _init
+ 
+ 
++def episode_steps(dt, episode_seconds):
++    """Evita arrotondamenti silenziosi della durata fisica richiesta."""
++    if not np.isfinite(dt) or dt <= 0:
++        raise ValueError("dt deve essere finito e positivo")
++    if not np.isfinite(episode_seconds) or episode_seconds < 10.0 + dt:
++        raise ValueError("episode-seconds deve consentire almeno 10 s di mantenimento")
++    steps = int(round(episode_seconds / dt))
++    if not np.isclose(steps * dt, episode_seconds, rtol=0, atol=1e-9):
++        raise ValueError("episode-seconds deve essere un multiplo di dt")
++    return steps
++
++
+ def main():
+     """
+     Funzione principale per l'addestramento dell'agente PPO.
+@@ -82,21 +216,20 @@ def main():
+     - CheckpointCallback: Salva il modello ogni 50.000 timesteps
+     - TensorBoard: Logging in tempo reale di metriche di performance
+ 
+-    Nota metodologica:
+-    -----------------
+-    L'addestramento di 1 milione di timesteps è scelto bilanciando:
+-    - Convergenza della policy (richiede ~500k-800k steps per problemi simili)
+-    - Tempo computazionale (circa 2-4 ore su CPU moderna)
+-    - Prevenzione dell'overfitting sull'ambiente di training
+-    
+-    Reward shaping (versione 2.0):
+-    ------------------------------
+-    La funzione di reward è stata migliorata per incentivare tre obiettivi:
+-    1. Riduzione dell'errore di assetto: reward positiva (1 - err_norm) * 10
+-    2. Stabilizzazione (bassa velocità): reward positiva (1 - omega_norm) * 2
+-    3. Efficienza energetica: penalità -0.005 * ||torques||^2
+-    Questo porta a una reward densa e ben strutturata che accelera la convergenza
+-    dell'agente verso la politica ottimale.
++    Revisione 2026-10-18:
++    --------------------
++    I run precedenti da 1M e 2M non stabilizzavano il satellite (RMS > 100
++    gradi). Il budget non garantisce convergenza: si parte con un pilota e
++    si valutano errore, velocita' e mantenimento oltre alla reward.
++    Reward corrente: -4*angle_error^2 -0.5*||omega||^2
++    -0.01*||torque/max_torque||^2 + 1 quando entro entrambe le soglie.
++    L'episodio dura episode-seconds anche se il bersaglio viene raggiunto.
++    Revisione v2: dt configurabile, validazione periodica indipendente
++    dalla reward e salvataggio della coppia modello/normalizzatore migliore.
++    Revisione v3: aggiunge 1 / (1 + (angle/deg2rad(2))^2 + (||omega||/0.01)^2).
++    Il best v2 arrestava il satellite ma a 2.072 gradi (0/5 successi).
++    L'efficacia della nuova reward deve essere valutata con un nuovo pilota.
++    La reward precedente resta commentata in SatelliteEnv.step.
+     """
+ 
+     # ===== PARSING DEGLI ARGOMENTI DA RIGA DI COMANDO =====
+@@ -151,7 +284,39 @@ def main():
+         default=False,
+         help="Attiva l'observation augmentation (aggiunge errore angolare)"
+     )
++    parser.add_argument("--seed", type=int, default=42, help="Seed del training")
++    parser.add_argument("--dt", type=float, default=0.1, help="Periodo di controllo [s]")
++    parser.add_argument("--episode-seconds", type=float, default=60.0,
++                        help="Durata fisica degli episodi [s]")
++    parser.add_argument("--eval-freq", type=int, default=100000,
++                        help="Valutazione fisica ogni N timestep (0 per disabilitare)")
++    parser.add_argument("--eval-episodes", type=int, default=3,
++                        help="Condizioni iniziali di validazione per ciascuno dei due scenari")
++    parser.add_argument("--eval-seed", type=int, default=2000,
++                        help="Seed di validazione, distinto dal test finale (1000)")
+     args = parser.parse_args()
++    try:
++        max_steps = episode_steps(args.dt, args.episode_seconds)
++    except ValueError as exc:
++        parser.error(str(exc))
++    if args.timesteps <= 0 or args.checkpoint_freq <= 0:
++        parser.error("timesteps e checkpoint-freq devono essere positivi")
++    if not np.isfinite(args.sensor_noise) or args.sensor_noise < 0:
++        parser.error("sensor-noise deve essere finito e non negativo")
++    if not np.isfinite(args.learning_rate) or args.learning_rate <= 0:
++        parser.error("learning-rate deve essere finito e positivo")
++    if args.seed < 0:
++        parser.error("seed deve essere non negativo")
++    if args.eval_freq < 0 or args.eval_episodes <= 0 or args.eval_seed < 0:
++        parser.error("eval-freq ed eval-seed devono essere non negativi; eval-episodes positivo")
++    if args.obs_augmented and args.eval_freq:
++        parser.error("La validazione fisica e' 7D: usare --eval-freq 0 con --obs-augmented")
++    if args.eval_freq:
++        try:
++            episode_steps(args.dt, max(args.episode_seconds, 60.0))
++            episode_steps(args.dt, max(args.episode_seconds, 80.0))
++        except ValueError as exc:
++            parser.error(f"Durata di validazione non compatibile con dt: {exc}")
+ 
+     print("="*70)
+     print("TRAINING AGENTE PPO PER CONTROLLO D'ASSETTO SATELLITARE")
+@@ -160,6 +325,9 @@ def main():
+     print()
+     print("Parametri da riga di comando:")
+     print(f"  • Timesteps totali:        {args.timesteps:,}")
++    print(f"  • Passo controllo:         {args.dt} s")
++    print(f"  • Durata episodio:         {args.episode_seconds} s ({max_steps} step)")
++    print(f"  • Validazione fisica:      ogni {args.eval_freq} step (0 = OFF)")
+     print(f"  • Frequenza checkpoint:    ogni {args.checkpoint_freq:,} steps")
+     print(f"  • Learning rate:           {args.learning_rate:.0e}")
+     print(f"  • Domain Randomization:    {'ON' if args.domain_rand else 'OFF'}")
+@@ -178,11 +346,27 @@ def main():
+     # Struttura risultante:
+     #   models/run_20260821_153000/   <- checkpoint + modello finale + vecnormalize
+     #   logs/run_20260821_153000/     <- log TensorBoard di questo specifico run
+-    run_id = datetime.now().strftime("run_%Y%m%d_%H%M%S")
++    # Storico: timestamp al secondo poteva sovrascrivere due lanci ravvicinati.
++    # run_id = datetime.now().strftime("run_%Y%m%d_%H%M%S")
++    run_id = datetime.now().strftime("run_%Y%m%d_%H%M%S_%f")
+     models_dir = os.path.join("models", run_id)
+     logs_dir = os.path.join("logs", run_id)
+-    os.makedirs(models_dir, exist_ok=True)
+-    os.makedirs(logs_dir, exist_ok=True)
++    os.makedirs(models_dir, exist_ok=False)
++    os.makedirs(logs_dir, exist_ok=False)
++    save_experiment_manifest(models_dir, {
++        **vars(args), "max_steps": max_steps, "max_torque": 0.05,
++        "canonical_observations": True, "success_hold_s": 10.0,
++        "validation_angles_deg": [15.0, 120.0],
++        "best_selection": ["success_rate", "-tail_normalized_error", "-control_effort"],
++        # Il peso e le scale identificano l'esperimento: non attribuire alla
++        # v2 i risultati di questa reward e non confondere bonus con successo.
++        "precision_reward": {
++            "form": "weight / (1 + (angle_rad/angle_scale_rad)^2 + (omega/omega_scale_rad_s)^2)",
++            "weight": PRECISION_REWARD_WEIGHT,
++            "angle_scale_rad": float(np.deg2rad(2.0)),
++            "omega_scale_rad_s": 0.01,
++        },
++    })
+ 
+     print(f"[INFO] Identificatore univoco del run: {run_id}")
+     print(f"[INFO] Directory di output create:")
+@@ -198,7 +382,9 @@ def main():
+         domain_rand=args.domain_rand,
+         sensor_noise=args.sensor_noise,
+         disturbances=args.disturbances,
+-        obs_augmented=args.obs_augmented
++        obs_augmented=args.obs_augmented,
++        dt=args.dt,
++        episode_seconds=args.episode_seconds
+     )])
+ 
+     # VecNormalize: Normalizzazione adattiva di osservazioni e reward
+@@ -292,8 +478,11 @@ def main():
+         policy="MlpPolicy",  # Policy basata su Multi-Layer Perceptron
+         env=env,
+         device="cpu",        # Per policy MLP, SB3 è generalmente più efficiente su CPU
++        seed=args.seed,
+         **hyperparams
+     )
++    model.control_dt = args.dt
++    model.canonical_observations = True
+ 
+     print("[OK] Modello PPO inizializzato con successo")
+     print()
+@@ -338,17 +527,31 @@ def main():
+     print("  - rollout/ep_len_mean: Lunghezza media degli episodi")
+     print("  - train/learning_rate: Learning rate corrente")
+     print("  - train/entropy_loss: Loss di entropia (exploration)")
+-    print("  - train/policy_loss: Loss della policy")
++    print("  - train/policy_gradient_loss: Loss della policy")
+     print("  - train/value_loss: Loss della value function")
++    print("  - control/angle_error_deg: Errore medio di assetto")
++    print("  - control/omega_magnitude: Velocita' angolare media [rad/s]")
++    print("  - control/in_target: Frazione di campioni entro entrambe le soglie")
++    print("  - control/episode_success: Successo negli ultimi 10 s dell'episodio")
++    print("  - control/reward_precision: Nuovo termine locale (non e' tasso di successo)")
++    print("  - validation/success_rate: Successo deterministico sui seed di validazione")
++    print("  - validation/tail_omega_rad_s: Velocita' negli ultimi 10 s")
++    print("  - validation/tail_angle_deg: Errore negli ultimi 10 s")
+     print()
+     print("-"*70)
+     print()
+ 
+     # Esecuzione del training
+     # Il progresso viene visualizzato automaticamente grazie a verbose=1
++    callbacks = [checkpoint_callback, ControlMetricsCallback()]
++    if args.eval_freq:
++        callbacks.append(PhysicalValidationCallback(
++            models_dir, args.eval_freq, args.eval_episodes, args.eval_seed,
++            args.dt, args.episode_seconds
++        ))
+     model.learn(
+         total_timesteps=total_timesteps,
+-        callback=checkpoint_callback,
++        callback=callbacks,
+         progress_bar=enable_progress_bar  # Abilitata solo se dipendenze presenti
+     )
+ 
+@@ -367,6 +570,12 @@ def main():
+     # (necessarie per utilizzare il modello in fase di test)
+     vecnorm_path = os.path.join(models_dir, "vec_normalize.pkl")
+     env.save(vecnorm_path)
++    with open(os.path.join(models_dir, "training_summary.json"), "w", encoding="utf-8") as handle:
++        json.dump({
++            "actual_timesteps": model.num_timesteps, "seed": args.seed,
++            "dt": args.dt, "episode_seconds": args.episode_seconds,
++            "simulated_seconds": model.num_timesteps * args.dt,
++        }, handle, indent=2)
+     print(f"[OK] Statistiche di normalizzazione salvate in: {vecnorm_path}")
+     print()
+ 
+@@ -426,4 +635,3 @@ if __name__ == "__main__":
+         - Per riprendere il training: modificare model.learn() per caricare un checkpoint esistente
+     """
+     main()
+-

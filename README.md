@@ -5,6 +5,22 @@
 Progetto di Tesi Magistrale in Ingegneria Informatica  
 Confronto tra controllore classico (LQR) e agente Deep RL (PPO)
 
+> **Revisione sperimentale del 18 ottobre 2026:** usare la procedura corrente
+> in [RUNBOOK.md](RUNBOOK.md#procedura-corrente-revisione-2026-10-18).
+> LQR ora e' discreto; PPO apprende su episodi a orizzonte fisso con nuova
+> reward. Ogni run salva configurazione, seed e snapshot dei sorgenti.
+> I risultati precedenti restano conservati, ma i modelli storici richiedono
+> un consenso esplicito per essere valutati con la nuova baseline.
+> Le sezioni seguenti descrivono anche la versione originaria: per comandi,
+> metriche e limiti metodologici fa fede il RUNBOOK aggiornato.
+> **Secondo pilota (v2):** passo configurabile (`--dt 0.05`), episodi di
+> 60 s e selezione su validazione fisica separata dal test.
+> Usare i comandi v2 del RUNBOOK e `test_and_plot.py --model best`.
+> **Revisione corrente v3:** nuovo termine continuo di precisione locale,
+> motivato dal residuo di 2.072 gradi del best v2. Soglie, dt e criteri di
+> successo non cambiano. Usare ora la procedura v3 del RUNBOOK; i richiami
+> alle revisioni precedenti restano per lo storico.
+
 ---
 
 ## 📋 Descrizione del Progetto
@@ -300,4 +316,3 @@ Anno Accademico 2025/2026
 ---
 
 **Per domande o problemi, consultare i commenti dettagliati nel codice sorgente.**
-

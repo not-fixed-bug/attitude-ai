@@ -1,0 +1,7 @@
+Test,Controllore,Settling Time [s],RMS Error [°],Steady-State Error [°],Energia,Coppia Picco [N·m],ω max [rad/s],Settled,Success 10s,Target fraction
+Test 1 (15°),LQR,0.70,0.91,0.000,0.000287,0.0500,0.6840,True,True,0.9758534554537885
+Test 1 (15°),PPO,1.00,1.42,1.071,0.000259,0.0500,0.7367,True,True,0.9675270607826811
+Test 2 (120°),LQR,1.55,8.29,0.000,0.002529,0.0500,3.6673,True,True,0.9712679575265459
+Test 2 (120°),PPO,2.50,8.26,1.071,0.002584,0.0500,3.8416,True,True,0.9525296689569019
+Test 3 (Robust.),LQR,1.10,3.06,0.289,0.008950,0.0500,1.7621,True,False,0.018318068276436304
+Test 3 (Robust.),PPO,2.00,3.23,1.100,0.004301,0.0500,1.8594,True,False,0.05995004163197336

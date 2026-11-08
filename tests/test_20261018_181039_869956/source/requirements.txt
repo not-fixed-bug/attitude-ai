@@ -1,0 +1,24 @@
+# Requirements per il progetto attitude-ai
+# Tesi Magistrale: Controllo d'assetto satellitare con Deep Reinforcement Learning
+# Corso di Laurea in Ingegneria Informatica
+
+# Librerie scientifiche fondamentali
+numpy>=1.24.0
+scipy>=1.10.0
+
+# Framework per Reinforcement Learning
+gymnasium>=0.29.0
+stable-baselines3>=2.0.0
+
+# Libreria per il controllo ottimo classico
+control>=0.9.4
+
+# Visualizzazione e logging
+matplotlib>=3.7.0
+tensorboard>=2.13.0
+
+# Utilities aggiuntive per il training
+torch>=2.0.0
+tqdm>=4.65.0
+rich>=13.0.0
+

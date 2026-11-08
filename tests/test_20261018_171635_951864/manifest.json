@@ -1,0 +1,184 @@
+{
+  "revision": "2026-10-18-sampling-validation-v2",
+  "created_at_utc": "2026-10-18T15:16:35.973790+00:00",
+  "base_commit": "dd24ae2ec1fbd34b5fe016ff1db9276e01b78b96",
+  "python": "3.9.25",
+  "packages": {
+    "numpy": "2.0.2",
+    "scipy": "1.13.1",
+    "gymnasium": "1.1.1",
+    "stable-baselines3": "2.7.1",
+    "torch": "2.8.0"
+  },
+  "source_sha256": {
+    "experiment_history.py": "caffe9dc415b5f6dff9475fdc749e7a38225010f9e28b69f63d93b2b6a861aa1",
+    "lqr_controller.py": "5a3942eeb031526bf3cc7d110500bc81ff9e679982b3d26a3b0a21959ca239cc",
+    "satellite_dynamics.py": "95110b4f003c507bc3521fe1f74e1d3606bc10a84da68aed0d9ccf38e6d7c07e",
+    "satellite_env.py": "eef6dc02e0cb330533d26d9057738b6e1de46dbc1ba50df273759d27066d2750",
+    "test_and_plot.py": "494b1fea3e0a6e91889158a7c6b81737dd6e9a8c2f6b99cb1da9df08029c3906",
+    "test_control_regressions.py": "f1bd675a9b950ca17366c530a25b88f812bb7877bebd4316d2b528ddcb6a4219",
+    "train.py": "044af5d428df4afa2fd8c482ce646fe8420d32f022725574375bc56f5a1ce905",
+    "requirements.txt": "3b084998f788db1285ee738cbc7b75806a8479a594ad7ed64a8acd9868ce3a47"
+  },
+  "configuration": {
+    "run": null,
+    "model": "best",
+    "seed": 1000,
+    "episodes": 5,
+    "allow_legacy_model": false,
+    "model_path": "/home/gcontini/PycharmProjects/attitude-ai/models/run_20261018_170417_025854/ppo_satellite_best.zip",
+    "model_sha256": "d85a59b481aed24c2a043e8a8e644a1e52ea79472e5af92852023bd294f16979",
+    "normalizer_sha256": "7353d2cc7df96653bd5b323fb1dc4fc5ea4c231f2a0433c170158ea29ff0ead6",
+    "training_manifest": {
+      "revision": "2026-10-18-sampling-validation-v2",
+      "created_at_utc": "2026-10-18T15:04:17.047429+00:00",
+      "base_commit": "dd24ae2ec1fbd34b5fe016ff1db9276e01b78b96",
+      "python": "3.9.25",
+      "packages": {
+        "numpy": "2.0.2",
+        "scipy": "1.13.1",
+        "gymnasium": "1.1.1",
+        "stable-baselines3": "2.7.1",
+        "torch": "2.8.0"
+      },
+      "source_sha256": {
+        "experiment_history.py": "caffe9dc415b5f6dff9475fdc749e7a38225010f9e28b69f63d93b2b6a861aa1",
+        "lqr_controller.py": "5a3942eeb031526bf3cc7d110500bc81ff9e679982b3d26a3b0a21959ca239cc",
+        "satellite_dynamics.py": "95110b4f003c507bc3521fe1f74e1d3606bc10a84da68aed0d9ccf38e6d7c07e",
+        "satellite_env.py": "eef6dc02e0cb330533d26d9057738b6e1de46dbc1ba50df273759d27066d2750",
+        "test_and_plot.py": "494b1fea3e0a6e91889158a7c6b81737dd6e9a8c2f6b99cb1da9df08029c3906",
+        "test_control_regressions.py": "f1bd675a9b950ca17366c530a25b88f812bb7877bebd4316d2b528ddcb6a4219",
+        "train.py": "044af5d428df4afa2fd8c482ce646fe8420d32f022725574375bc56f5a1ce905",
+        "requirements.txt": "3b084998f788db1285ee738cbc7b75806a8479a594ad7ed64a8acd9868ce3a47"
+      },
+      "configuration": {
+        "timesteps": 600000,
+        "checkpoint_freq": 100000,
+        "learning_rate": 0.0003,
+        "domain_rand": false,
+        "sensor_noise": 0.0,
+        "disturbances": false,
+        "obs_augmented": false,
+        "seed": 42,
+        "dt": 0.05,
+        "episode_seconds": 60.0,
+        "eval_freq": 100000,
+        "eval_episodes": 3,
+        "eval_seed": 2000,
+        "max_steps": 1200,
+        "max_torque": 0.05,
+        "canonical_observations": true,
+        "success_hold_s": 10.0,
+        "validation_angles_deg": [
+          15.0,
+          120.0
+        ],
+        "best_selection": [
+          "success_rate",
+          "-tail_normalized_error",
+          "-control_effort"
+        ]
+      }
+    },
+    "best_validation": {
+      "timesteps": 500000,
+      "phase": "periodic",
+      "dt": 0.05,
+      "success_rate": 0.0,
+      "tail_normalized_error": 1.0360287799181607,
+      "control_effort": 0.001013678141542795,
+      "selection_score": [
+        0.0,
+        -1.0360287799181607,
+        -0.001013678141542795
+      ],
+      "new_best": true,
+      "episodes": [
+        {
+          "angle_deg": 15.0,
+          "seed": 2000,
+          "duration_s": 60.0,
+          "success": false,
+          "rms_error_deg": 2.4504733158916756,
+          "settling_time_s": null,
+          "tail_angle_deg": 2.0720557854539257,
+          "tail_omega_rad_s": 8.303976455030541e-09,
+          "tail_normalized_error": 1.0360287231246084,
+          "control_effort": 0.0002479459975912451
+        },
+        {
+          "angle_deg": 15.0,
+          "seed": 2001,
+          "duration_s": 60.0,
+          "success": false,
+          "rms_error_deg": 2.336814240226917,
+          "settling_time_s": null,
+          "tail_angle_deg": 2.0720557888469564,
+          "tail_omega_rad_s": 8.937629975582786e-09,
+          "tail_normalized_error": 1.0360287881864758,
+          "control_effort": 0.00016505439322821538
+        },
+        {
+          "angle_deg": 15.0,
+          "seed": 2002,
+          "duration_s": 60.0,
+          "success": false,
+          "rms_error_deg": 2.4155708114525325,
+          "settling_time_s": null,
+          "tail_angle_deg": 2.0720557904995753,
+          "tail_omega_rad_s": 8.907450769265442e-09,
+          "tail_normalized_error": 1.0360287859948647,
+          "control_effort": 0.00018233508270100118
+        },
+        {
+          "angle_deg": 120.0,
+          "seed": 2000,
+          "duration_s": 80.0,
+          "success": false,
+          "rms_error_deg": 11.241416712937898,
+          "settling_time_s": null,
+          "tail_angle_deg": 2.0720557907374797,
+          "tail_omega_rad_s": 8.989389393780208e-09,
+          "tail_normalized_error": 1.0360287943076791,
+          "control_effort": 0.0020182519775220615
+        },
+        {
+          "angle_deg": 120.0,
+          "seed": 2001,
+          "duration_s": 80.0,
+          "success": false,
+          "rms_error_deg": 9.339587580502695,
+          "settling_time_s": null,
+          "tail_angle_deg": 2.0720557881197568,
+          "tail_omega_rad_s": 9.242027787237071e-09,
+          "tail_normalized_error": 1.0360288182626571,
+          "control_effort": 0.0015943820482203698
+        },
+        {
+          "angle_deg": 120.0,
+          "seed": 2002,
+          "duration_s": 80.0,
+          "success": false,
+          "rms_error_deg": 10.487282083278815,
+          "settling_time_s": null,
+          "tail_angle_deg": 2.0720557888115407,
+          "tail_omega_rad_s": 8.752269082905346e-09,
+          "tail_normalized_error": 1.0360287696326786,
+          "control_effort": 0.0018740993499938763
+        }
+      ]
+    },
+    "dt": 0.05,
+    "success_angle_deg": 2.0,
+    "success_omega_rad_s": 0.01,
+    "hold_time_s": 10.0,
+    "plots_seed": 1000,
+    "evaluation_seeds": [
+      1000,
+      1001,
+      1002,
+      1003,
+      1004
+    ]
+  }
+}

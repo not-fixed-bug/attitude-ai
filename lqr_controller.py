@@ -14,7 +14,9 @@ Tesi Magistrale in Ingegneria Informatica
 """
 
 import numpy as np
-from scipy.linalg import solve_continuous_are
+from scipy.linalg import solve_discrete_are
+from scipy.signal import cont2discrete
+from satellite_dynamics import canonicalize_observation
 
 
 class LQRController:
@@ -68,9 +70,15 @@ class LQRController:
         R (np.ndarray): Matrice di peso per i controlli (3x3)
         K (np.ndarray): Matrice di guadagno ottimale LQR (3x6)
         max_torque (float): Saturazione delle coppie di controllo [N·m]
+        dt (float): Periodo di campionamento [s].
+
+    Dal 2026-10-18 il progetto usa la versione discreta:
+    J = sum_k (x_k.T Q x_k + u_k.T R u_k),
+    x_{k+1} = A_d x_k + B_d u_k, con discretizzazione ZOH.
+    Le equazioni continue sopra sono conservate come riferimento teorico.
     """
 
-    def __init__(self, inertia_matrix=None, Q=None, R=None, max_torque=0.05):
+    def __init__(self, inertia_matrix=None, Q=None, R=None, max_torque=0.05, dt=0.1):
         """
         Inizializza il controllore LQR e calcola la matrice di guadagno ottimale.
 
@@ -103,6 +111,9 @@ class LQRController:
 
         # Limite di saturazione degli attuatori
         self.max_torque = max_torque
+        if not np.isfinite(dt) or dt <= 0:
+            raise ValueError("dt deve essere finito e positivo")
+        self.dt = dt
 
         # ===== CONFIGURAZIONE DELLE MATRICI DI PESO =====
 
@@ -125,12 +136,20 @@ class LQRController:
         # Costruzione delle matrici A e B del sistema linearizzato
         A, B = self._get_linearized_system()
 
-        # Risoluzione dell'equazione algebrica di Riccati continua (CARE)
-        # A^T P + P A - P B R^(-1) B^T P + Q = 0
-        P = solve_continuous_are(A, B, self.Q, self.R)
-
-        # Calcolo della matrice di guadagno ottimale: K = R^(-1) B^T P
-        self.K = np.linalg.inv(self.R) @ B.T @ P
+        # Risoluzione dell'equazione algebrica di Riccati discreta (DARE).
+        # Storico 2026-10-18: RMS nominale 3.17 gradi, residuo 2.644 gradi
+        # e coppie continuamente saturate nei test storici.
+        # P = solve_continuous_are(A, B, self.Q, self.R)
+        # self.K = np.linalg.inv(self.R) @ B.T @ P
+        # Il progetto continuo ignorava il mantenimento ZOH per dt=0.1 s.
+        self.A_d, self.B_d, _, _, _ = cont2discrete(
+            (A, B, np.eye(6), np.zeros((6, 3))), dt, method="zoh"
+        )
+        P = solve_discrete_are(self.A_d, self.B_d, self.Q, self.R)
+        self.K = np.linalg.solve(
+            self.R + self.B_d.T @ P @ self.B_d,
+            self.B_d.T @ P @ self.A_d
+        )
 
     def _get_linearized_system(self):
         """
@@ -218,7 +237,11 @@ class LQRController:
         # dove θ è l'angolo di rotazione e n̂ è l'asse di rotazione unitario
         #
         # Invertendo: θ * n̂ ≈ 2 * [q1, q2, q3] (valido per piccoli angoli)
-        euler_angles = 2.0 * quaternion[1:]  # Approssimazione: θ ≈ 2 * q_vector
+        # Storico 2026-10-18:
+        # euler_angles = 2.0 * quaternion[1:]
+        # q e -q sono lo stesso assetto: non devono invertire il comando.
+        quaternion = canonicalize_observation(state)[:4]
+        euler_angles = 2.0 * quaternion[1:]
 
         # ===== COSTRUZIONE DEL VETTORE DI ERRORE =====
         # Il vettore di stato per l'LQR è: x = [θx, θy, θz, ωx, ωy, ωz]
@@ -282,4 +305,3 @@ class LQRController:
         control[fault_axis] *= (1.0 - fault_severity)
 
         return control
-

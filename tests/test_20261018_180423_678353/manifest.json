@@ -1,0 +1,215 @@
+{
+  "revision": "2026-10-18-local-precision-v3",
+  "created_at_utc": "2026-10-18T16:04:23.704022+00:00",
+  "base_commit": "dd24ae2ec1fbd34b5fe016ff1db9276e01b78b96",
+  "python": "3.9.25",
+  "packages": {
+    "numpy": "2.0.2",
+    "scipy": "1.13.1",
+    "gymnasium": "1.1.1",
+    "stable-baselines3": "2.7.1",
+    "torch": "2.8.0"
+  },
+  "source_sha256": {
+    "experiment_history.py": "d12eed9bcb85e75cc7ee62acd48f9c05c2f5566ffe25aa4e95349000c78f659f",
+    "lqr_controller.py": "5a3942eeb031526bf3cc7d110500bc81ff9e679982b3d26a3b0a21959ca239cc",
+    "satellite_dynamics.py": "95110b4f003c507bc3521fe1f74e1d3606bc10a84da68aed0d9ccf38e6d7c07e",
+    "satellite_env.py": "66ef5291bd2fedd1934804afd1f98b8074851d684d95eccabefcb35f8dc17ef1",
+    "test_and_plot.py": "494b1fea3e0a6e91889158a7c6b81737dd6e9a8c2f6b99cb1da9df08029c3906",
+    "test_control_regressions.py": "6834d4f0daa09817c0d1f8f54eace9bff11d268affdec3a60c72868ddddf10c8",
+    "train.py": "8b2bb90abcd3725c40461954bd7154d608599653ac93b93372357b74a1604ea4",
+    "requirements.txt": "3b084998f788db1285ee738cbc7b75806a8479a594ad7ed64a8acd9868ce3a47"
+  },
+  "configuration": {
+    "run": null,
+    "model": "best",
+    "seed": 3000,
+    "episodes": 30,
+    "allow_legacy_model": false,
+    "model_path": "/home/gcontini/PycharmProjects/attitude-ai/models/run_20261018_174608_689065/ppo_satellite_best.zip",
+    "model_sha256": "1eeee75da102e58dc2544d2514156e2183e8ac683dd54a92ba350ec1c0b0fcce",
+    "normalizer_sha256": "d2a0193e3ee40ee4840b752f0105f498fd0d36293da1f5adc5ea4a4d2ca72f8c",
+    "training_manifest": {
+      "revision": "2026-10-18-local-precision-v3",
+      "created_at_utc": "2026-10-18T15:46:08.708549+00:00",
+      "base_commit": "dd24ae2ec1fbd34b5fe016ff1db9276e01b78b96",
+      "python": "3.9.25",
+      "packages": {
+        "numpy": "2.0.2",
+        "scipy": "1.13.1",
+        "gymnasium": "1.1.1",
+        "stable-baselines3": "2.7.1",
+        "torch": "2.8.0"
+      },
+      "source_sha256": {
+        "experiment_history.py": "d12eed9bcb85e75cc7ee62acd48f9c05c2f5566ffe25aa4e95349000c78f659f",
+        "lqr_controller.py": "5a3942eeb031526bf3cc7d110500bc81ff9e679982b3d26a3b0a21959ca239cc",
+        "satellite_dynamics.py": "95110b4f003c507bc3521fe1f74e1d3606bc10a84da68aed0d9ccf38e6d7c07e",
+        "satellite_env.py": "66ef5291bd2fedd1934804afd1f98b8074851d684d95eccabefcb35f8dc17ef1",
+        "test_and_plot.py": "494b1fea3e0a6e91889158a7c6b81737dd6e9a8c2f6b99cb1da9df08029c3906",
+        "test_control_regressions.py": "6834d4f0daa09817c0d1f8f54eace9bff11d268affdec3a60c72868ddddf10c8",
+        "train.py": "8b2bb90abcd3725c40461954bd7154d608599653ac93b93372357b74a1604ea4",
+        "requirements.txt": "3b084998f788db1285ee738cbc7b75806a8479a594ad7ed64a8acd9868ce3a47"
+      },
+      "configuration": {
+        "timesteps": 1200000,
+        "checkpoint_freq": 100000,
+        "learning_rate": 0.0003,
+        "domain_rand": false,
+        "sensor_noise": 0.0,
+        "disturbances": false,
+        "obs_augmented": false,
+        "seed": 42,
+        "dt": 0.05,
+        "episode_seconds": 60.0,
+        "eval_freq": 100000,
+        "eval_episodes": 3,
+        "eval_seed": 2000,
+        "max_steps": 1200,
+        "max_torque": 0.05,
+        "canonical_observations": true,
+        "success_hold_s": 10.0,
+        "validation_angles_deg": [
+          15.0,
+          120.0
+        ],
+        "best_selection": [
+          "success_rate",
+          "-tail_normalized_error",
+          "-control_effort"
+        ],
+        "precision_reward": {
+          "form": "weight / (1 + (angle_rad/angle_scale_rad)^2 + (omega/omega_scale_rad_s)^2)",
+          "weight": 1.0,
+          "angle_scale_rad": 0.03490658503988659,
+          "omega_scale_rad_s": 0.01
+        }
+      }
+    },
+    "best_validation": {
+      "timesteps": 800000,
+      "phase": "periodic",
+      "dt": 0.05,
+      "success_rate": 1.0,
+      "tail_normalized_error": 0.4258286847138142,
+      "control_effort": 0.0005807303351626956,
+      "selection_score": [
+        1.0,
+        -0.4258286847138142,
+        -0.0005807303351626956
+      ],
+      "new_best": true,
+      "episodes": [
+        {
+          "angle_deg": 15.0,
+          "seed": 2000,
+          "duration_s": 60.0,
+          "success": true,
+          "rms_error_deg": 1.6309674841832351,
+          "settling_time_s": 2.0,
+          "tail_angle_deg": 0.8516570300608016,
+          "tail_omega_rad_s": 2.5744881517314103e-09,
+          "tail_normalized_error": 0.42582877247921597,
+          "control_effort": 9.243321000890843e-05
+        },
+        {
+          "angle_deg": 15.0,
+          "seed": 2001,
+          "duration_s": 60.0,
+          "success": true,
+          "rms_error_deg": 1.5258420874854643,
+          "settling_time_s": 1.85,
+          "tail_angle_deg": 0.8516570220018285,
+          "tail_omega_rad_s": 1.8556226048943262e-09,
+          "tail_normalized_error": 0.42582869656317474,
+          "control_effort": 8.154896889384826e-05
+        },
+        {
+          "angle_deg": 15.0,
+          "seed": 2002,
+          "duration_s": 60.0,
+          "success": true,
+          "rms_error_deg": 1.643967153100034,
+          "settling_time_s": 2.25,
+          "tail_angle_deg": 0.8516570142508019,
+          "tail_omega_rad_s": 1.4745694929665017e-09,
+          "tail_normalized_error": 0.42582865458235025,
+          "control_effort": 0.00013302428129816307
+        },
+        {
+          "angle_deg": 120.0,
+          "seed": 2000,
+          "duration_s": 80.0,
+          "success": true,
+          "rms_error_deg": 11.470227104645145,
+          "settling_time_s": 3.9000000000000004,
+          "tail_angle_deg": 0.8516570309013752,
+          "tail_omega_rad_s": 1.0713802586592438e-09,
+          "tail_normalized_error": 0.42582862258871346,
+          "control_effort": 0.0008819169613083066
+        },
+        {
+          "angle_deg": 120.0,
+          "seed": 2001,
+          "duration_s": 80.0,
+          "success": true,
+          "rms_error_deg": 9.43758149156853,
+          "settling_time_s": 3.75,
+          "tail_angle_deg": 0.8516570157686038,
+          "tail_omega_rad_s": 1.513913338041795e-09,
+          "tail_normalized_error": 0.4258286592756357,
+          "control_effort": 0.0010414500953086722
+        },
+        {
+          "angle_deg": 120.0,
+          "seed": 2002,
+          "duration_s": 80.0,
+          "success": true,
+          "rms_error_deg": 10.99689330750504,
+          "settling_time_s": 4.3,
+          "tail_angle_deg": 0.8516569470786476,
+          "tail_omega_rad_s": 2.2925447153009544e-09,
+          "tail_normalized_error": 0.4258287027937953,
+          "control_effort": 0.0012540084941582749
+        }
+      ]
+    },
+    "dt": 0.05,
+    "success_angle_deg": 2.0,
+    "success_omega_rad_s": 0.01,
+    "hold_time_s": 10.0,
+    "plots_seed": 3000,
+    "evaluation_seeds": [
+      3000,
+      3001,
+      3002,
+      3003,
+      3004,
+      3005,
+      3006,
+      3007,
+      3008,
+      3009,
+      3010,
+      3011,
+      3012,
+      3013,
+      3014,
+      3015,
+      3016,
+      3017,
+      3018,
+      3019,
+      3020,
+      3021,
+      3022,
+      3023,
+      3024,
+      3025,
+      3026,
+      3027,
+      3028,
+      3029
+    ]
+  }
+}
